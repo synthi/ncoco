@@ -1,12 +1,12 @@
--- ncoco.lua v2002
+-- ncoco.lua v2005
 -- name: Ncoco
 -- desc: Hexaquantus Lo-Fi Delay & Chaos Computer.
 --       A Ciat-Lonbarde inspired instrument.
 -- tags: delay, lo-fi, chaos, feedback
 --
--- v2002 CHANGELOG:
--- 1. THE BOSS LOGIC: When /buffer_info arrives, tape_len is clamped (0.1-60s)
---    and set as the master length.
+-- v2005 CHANGELOG:
+-- 1. SEQUENCER ENGINE: Replaced 'Sleep' logic with 'Absolute Time Scheduler'.
+--    Fixes timing freeze during Overdub/Insert. High-res scanning (100Hz).
 
 engine.name = 'Ncoco'
 
@@ -23,23 +23,71 @@ local g = grid.connect()
 local m = midi.connect()
 local grid_metro, screen_metro
 
--- ENSURE AUDIO DIR EXISTS
 if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
+end
+
+-- --- ABSOLUTE TIME SEQUENCER ENGINE ---
+local function run_sequencer(id, grid_device)
+  local s = G.sequencers[id]
+  s.playhead = 0
+  s.last_cpu_time = util.time()
+  
+  -- Helper to trigger events in a time window
+  local function trigger_window(t_start, t_end)
+     for _, event in ipairs(s.data) do
+        -- Check if event falls in this window [start, end)
+        if event.dt >= t_start and event.dt < t_end then
+           GridNav.key(G, grid_device, event.x, event.y, event.z, true)
+        end
+     end
+  end
+
+  while true do
+    -- Only run if Playing (2) or Dubbing (4) and has duration
+    if (s.state == 2 or s.state == 4) and s.duration > 0.01 then
+       local now = util.time()
+       local delta = now - s.last_cpu_time
+       s.last_cpu_time = now
+       
+       -- Advance playhead
+       local old_head = s.playhead
+       s.playhead = s.playhead + delta
+       
+       if s.playhead >= s.duration then
+          -- WRAP AROUND (LOOP)
+          -- 1. Trigger events from old_head to End
+          trigger_window(old_head, s.duration + 0.001) -- +margin
+          
+          -- 2. Wrap
+          s.playhead = s.playhead % s.duration
+          
+          -- 3. Trigger events from Start to new playhead
+          trigger_window(0, s.playhead)
+          
+          -- Sync start_time for DUB logic alignment
+          s.start_time = now - s.playhead
+       else
+          -- NORMAL ADVANCE
+          trigger_window(old_head, s.playhead)
+       end
+       
+       clock.sleep(0.01) -- High res tick (10ms)
+    else
+       -- If Stopped or Empty, just update timestamp to avoid jumps on start
+       s.last_cpu_time = util.time()
+       s.playhead = 0
+       clock.sleep(0.1) -- Idle sleep
+    end
+  end
 end
 
 function init()
   GridNav.init_map(G)
   Params.init(SC, G)
   
-  -- CONNECT STORAGE TO PSET SYSTEM
-  params.action_write = function(filename, name, number) 
-    Storage.save(G, number) 
-  end
-  
-  params.action_read = function(filename, silent, number) 
-    Storage.load(G, SC, number) 
-  end
+  params.action_write = function(filename, name, number) Storage.save(G, number) end
+  params.action_read = function(filename, silent, number) Storage.load(G, SC, number) end
 
   osc.event = function(path, args, from)
     if path == '/update' then
@@ -54,13 +102,9 @@ function init()
       G.coco[1].out_level = args[21]; G.coco[2].out_level = args[22]
       
     elseif path == '/buffer_info' then
-      -- AUTO-RESIZE: When audio loads, update tape_len so UI scales correctly
-      -- args[1] = ID (1=L, 2=R), args[2] = Duration
       local dur = args[2]
       if dur > 0 then
-         -- Clamp to max buffer size (60s)
          dur = util.clamp(dur, 0.1, 60.0)
-         print("Ncoco: Tape Loaded. Resizing loop to " .. dur .. "s")
          params:set("tape_len", dur)
       end
     end
@@ -82,6 +126,9 @@ function init()
       params:set("p"..i.."f_aud", seed_aud)
       SC.set_petal_freq(i, seed_lfo)
     end
+    
+    -- START SEQUENCERS (Pass 'g' object)
+    for i=1, 4 do clock.run(function() run_sequencer(i, g) end) end
 
     grid_metro = metro.init(); grid_metro.time = 1/20
     grid_metro.event = function() pcall(GridNav.redraw, G, g) end
@@ -92,7 +139,7 @@ function init()
     screen_metro:start()
     
     G.loaded = true 
-    print("Ncoco v2002 Ready.")
+    print("Ncoco v2005 Ready.")
   end)
 
   _16n.init(function(msg) 
@@ -176,13 +223,15 @@ function enc(n,d)
     local c = "L"
     if n==1 then params:delta("filt"..c, d); if is_link then params:delta("filtR", d) end
     elseif n==2 then params:delta("speed"..c, d/10); if is_link then params:delta("speedR", d/10) end
-    elseif n==3 then params:delta("fb"..c, d); if is_link then params:delta("fbR", d) end
+    elseif n==3 then 
+       params:delta("fb"..c, d/3); 
+       if is_link then params:delta("fbR", d/3) end
     end
   elseif G.focus.edit_r then
     local c = "R"
     if n==1 then params:delta("filt"..c, d)
     elseif n==2 then params:delta("speed"..c, d/10)
-    elseif n==3 then params:delta("fb"..c, d) end
+    elseif n==3 then params:delta("fb"..c, d/3) end 
   else
     if n==1 then params:delta("global_vol", d) end
     if n==2 then params:delta("speedL", d/10); params:delta("speedR", d/10) end
