@@ -1,6 +1,7 @@
--- lib/globals.lua v1026
--- CHANGELOG v1026:
--- 1. ADDED: Tape Paths state for Timestamped saving.
+-- lib/globals.lua v2005
+-- CHANGELOG v2005:
+-- 1. SEQUENCER STRUCTURE: Updated for Absolute Time Scheduler.
+--    Replaced 'step' with 'playhead' (cursor position in seconds).
 
 local M = {}
 
@@ -29,6 +30,22 @@ M.coco = {
 }
 
 M.input = { { preamp=1.0, slew=0.05 }, { preamp=1.0, slew=0.05 } }
+
+-- Sequencers (Ghost Hands)
+-- States: 0=Empty, 1=Rec, 2=Play, 3=Stop, 4=Dub
+M.sequencers = {}
+for i=1, 4 do
+  M.sequencers[i] = {
+    data = {},
+    state = 0,
+    -- step = 1, -- DEPRECATED (Relative)
+    playhead = 0.0, -- NEW (Absolute Position in loop)
+    last_cpu_time = 0, -- NEW (Delta calc)
+    start_time = 0,
+    duration = 0,
+    double_click_timer = nil
+  }
+end
 
 -- Ring Buffers
 M.TRAIL_SIZE = 10
