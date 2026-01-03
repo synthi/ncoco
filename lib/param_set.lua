@@ -1,12 +1,10 @@
--- lib/param_set.lua v2002
--- CHANGELOG v2002:
--- 1. FIX: 'load_tape' now uses correct syntax params:add{type="file"...}.
---    This fixes manual loading issues.
+-- lib/param_set.lua v2003
+-- CHANGELOG v2003:
+-- 1. FINE TUNING: Feedback param step set to 0.0 (continuous) for smooth adjustment.
 
 local Params = {}
 
 function Params.init(SC, G)
-  -- 1. GLOBALS & TAPE
   params:add_separator("GLOBALS")
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) SC.set_amp(1,x); SC.set_amp(2,x) end)
@@ -22,17 +20,14 @@ function Params.init(SC, G)
   params:add_control("tape_len", "Loop Length", controlspec.new(0.1, 60, "lin", 0.1, 8.0, "s"))
   params:set_action("tape_len", function(x) SC.set_loop_len(x) end)
   
-  -- STORAGE ACTIONS
   params:add_trigger("save_tape", "Save New Tape")
   params:set_action("save_tape", function() if params.action_write then params.action_write() end end)
   
-  -- MANUAL LOAD FIX (CORRECT SYNTAX)
   params:add{type="file", id="load_tape", name="Load Tape", path=_path.audio, action=function(path) 
     if path and path ~= "cancel" and path ~= "" then
-       print("Manual Load: "..path)
        local t = params:get("tape_target")
-       if t==1 or t==3 then engine.read_tape(1, path) end -- 1=L
-       if t==2 or t==3 then engine.read_tape(2, path) end -- 2=R
+       if t==1 or t==3 then engine.read_tape(1, path) end 
+       if t==2 or t==3 then engine.read_tape(2, path) end 
     end
   end}
   
@@ -56,8 +51,11 @@ function Params.init(SC, G)
     
     params:add_control("speed"..s, "Speed "..num, controlspec.new(0.001, 3.0, "lin", 0, 1.0))
     params:set_action("speed"..s, function(x) SC.set_speed(i, x) end)
+    
+    -- FEEDBACK: Continuous resolution (step=0)
     params:add_control("fb"..s, "Feedback "..num, controlspec.new(0, 1.2, "lin", 0, 0.85))
     params:set_action("fb"..s, function(x) SC.set_feedback(i,x) end)
+    
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
