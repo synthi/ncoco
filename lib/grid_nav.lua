@@ -1,7 +1,8 @@
--- lib/grid_nav.lua v1019
--- CHANGELOG v1019:
--- 1. FIX: Cache clears on z=0 (Release) to prevent stuck LEDs.
--- 2. VISUAL: Input Jacks now show live activity (Brightness modulated by Input Energy).
+-- lib/grid_nav.lua v2004
+-- CHANGELOG v2004:
+-- 1. FIX REC LOGIC: Loop closes on 2nd Press (z=1), NOT on Release. 
+--    Prevents accidental micro-loops.
+-- 2. VISUALS: Tuned brightness levels (Stop=5, Play=12, Rec=SlowPulse, Dub=FastPulse).
 
 local SC = include('ncoco/lib/sc_utils')
 local GridNav = {}
@@ -14,6 +15,10 @@ function GridNav.init_map(G)
 
   map(1,1,'edit',1); map(2,1,'edit',1); map(1,2,'edit',1); map(2,2,'edit',1)
   map(15,1,'edit',2); map(16,1,'edit',2); map(15,2,'edit',2); map(16,2,'edit',2)
+  
+  -- SEQUENCERS (Row 1)
+  map(3,1,'seq',1); map(4,1,'seq',2); map(13,1,'seq',3); map(14,1,'seq',4)
+
   map(1,3,'rec',1); map(2,3,'jack',7); map(1,4,'flip',1); map(2,4,'jack',5); map(1,5,'skip',1); map(2,5,'jack',6)
   map(16,3,'rec',2); map(15,3,'jack',14); map(16,4,'flip',2); map(15,4,'jack',12); map(16,5,'skip',2); map(15,5,'jack',13)
   map(8,3,'petal',9); map(9,3,'petal',10) 
@@ -27,20 +32,97 @@ function GridNav.init_map(G)
   for x=10,16 do map(x,8,'fader',2, 17-x) end
 end
 
-function GridNav.key(G, g, x, y, z)
+function GridNav.key(G, g, x, y, z, simulated)
   local obj = G.grid_map[x] and G.grid_map[x][y]
   if not obj then return end
   
+  -- --- SEQUENCER SNIFFER (RECORDING) ---
+  if not simulated and obj.t ~= 'seq' then
+    local now = util.time()
+    for i=1, 4 do
+      local s = G.sequencers[i]
+      if s.state == 1 or s.state == 4 then -- REC or DUB
+         local dt = now - s.start_time
+         if s.state == 4 and s.duration > 0 then dt = dt % s.duration end
+         
+         table.insert(s.data, {x=x, y=y, z=z, dt=dt})
+         
+         if s.state == 4 then
+            table.sort(s.data, function(a,b) return a.dt < b.dt end)
+         end
+      end
+    end
+  end
+  -- -------------------------------------
+
   if z == 1 then 
     GridNav.cache[x][y] = 15
     if g then g:led(x, y, 15); g:refresh() end 
   end
-  
-  -- FIX: Clear cache on release
-  if z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec') then 
+  if z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec' or obj.t == 'seq') then 
     GridNav.cache[x][y] = -1
   end
 
+  -- SEQUENCER LOGIC
+  if obj.t == 'seq' then
+     local s = G.sequencers[obj.id]
+     if z == 1 then
+        s.press_time = util.time()
+        
+        -- State 0 -> 1 (START REC)
+        if s.state == 0 then
+           s.state = 1
+           s.data = {}
+           s.start_time = util.time()
+           s.step = 1
+           
+        -- State 1 -> 2 (END REC -> PLAY)
+        -- NOW HAPPENS ON PRESS, NOT RELEASE
+        elseif s.state == 1 then
+           s.duration = util.time() - s.start_time
+           if s.duration < 0.1 then s.duration = 0.1 end 
+           s.state = 2 
+           s.start_time = util.time() -- Sync playback start
+           print("Seq "..obj.id.." Loop Closed: "..string.format("%.2fs", s.duration))
+           
+        -- States 2/4 (Play/Dub) -> Double Click Logic
+        elseif s.state == 2 or s.state == 4 then
+           if s.double_click_timer then
+              -- Double Click -> STOP
+              s.state = 3
+              s.double_click_timer = nil
+           else
+              -- First Click -> Wait...
+              s.double_click_timer = clock.run(function()
+                 clock.sleep(0.25)
+                 if s.state == 3 then return end -- Was stopped manually
+                 
+                 -- Timeout -> Toggle Play/Dub
+                 if s.state == 2 then s.state = 4
+                 else s.state = 2 end
+                 s.double_click_timer = nil
+              end)
+           end
+           
+        -- State 3 -> 2 (STOP -> PLAY)
+        elseif s.state == 3 then
+           s.state = 2
+           s.start_time = util.time() 
+           s.step = 1
+        end
+        
+     elseif z == 0 then
+        -- Long Press Clear
+        if util.time() - s.press_time > 1.0 then
+           s.state = 0
+           s.data = {}
+           print("Seq "..obj.id.." Cleared")
+        end
+     end
+     return
+  end
+
+  -- STANDARD LOGIC
   if obj.t == 'edit' then if obj.id==1 then G.focus.edit_l=(z==1) end; if obj.id==2 then G.focus.edit_r=(z==1) end; return end
   if obj.t == 'petal' or obj.t == 'env' then 
     if z==1 then G.focus.source=obj.id; G.focus.last_dest=nil elseif G.focus.source==obj.id then G.focus.source=nil end 
@@ -100,6 +182,18 @@ function GridNav.redraw(G, g)
     local obj=G.grid_map[x][y]; local b=0
     if obj then
       if obj.t=='edit' then b=((G.focus.edit_l and obj.id==1) or (G.focus.edit_r and obj.id==2)) and 15 or 4
+      elseif obj.t=='seq' then
+         local s = G.sequencers[obj.id]
+         if GridNav.cache[x][y] == 15 then b=15 -- Manual press override
+         elseif s.state == 0 then b=2 -- Empty
+         elseif s.state == 1 then -- Rec (Slow Pulse)
+            b = math.floor(util.linlin(-1, 1, 5, 15, math.sin(util.time() * 5)))
+         elseif s.state == 2 then b=12 -- Play (Steady Bright)
+         elseif s.state == 3 then b=5  -- Stop (Dim)
+         elseif s.state == 4 then -- Dub (Fast Pulse)
+            b = math.floor(util.linlin(-1, 1, 5, 15, math.sin(util.time() * 15)))
+         end
+         
       elseif obj.t=='petal' or obj.t=='env' then 
         if G.focus.inspect_dest then b = (G.patch[obj.id][G.focus.inspect_dest] ~= 0) and 15 or 2
         elseif G.focus.source==obj.id then b=15 
@@ -108,11 +202,9 @@ function GridNav.redraw(G, g)
         if G.focus.source then b=(G.patch[G.focus.source][obj.id]~=0) and 12 or 3
         elseif G.focus.inspect_dest==obj.id then b=15
         else 
-          -- LIVE INPUT ACTIVITY: Modulate brightness based on energy
           local energy = 0
           for src=1, 10 do
              local amt = G.patch[src][obj.id]
-             -- Use ABS to light up even if modulation is negative
              if amt ~= 0 then energy = energy + math.abs(G.sources_val[src] * amt) end
           end
           local alive = math.floor(energy * 5)
@@ -124,7 +216,6 @@ function GridNav.redraw(G, g)
         local p=params:get("rec"..(obj.id==1 and "L" or "R"))
         local c=G.coco[obj.id]
         local is_active = (c.gate_rec and c.gate_rec > 0.5)
-        
         if GridNav.cache[x][y] == 15 then b=15 
         elseif is_active then 
            b = math.floor(util.linlin(-1, 1, 10, 14, math.sin(util.time() * 15)))
