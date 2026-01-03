@@ -1,4 +1,7 @@
--- lib/sc_utils.lua v600
+-- lib/sc_utils.lua v1005
+-- CHANGELOG v1005:
+-- 1. Added update_dest_gains function.
+
 local SC = {}
 
 local dest_names = {
@@ -12,9 +15,13 @@ local dest_names = {
 
 function SC.update_matrix(dest_id, G)
   local args = {}
-  for src=1, 8 do table.insert(args, G.patch[src][dest_id]) end
+  for src=1, 10 do table.insert(args, G.patch[src][dest_id]) end
   local cmd = dest_names[dest_id]
   if cmd and engine[cmd] then engine[cmd](table.unpack(args)) end
+end
+
+function SC.update_dest_gains(G)
+  if engine.dest_gains then engine.dest_gains(table.unpack(G.dest_gains)) end
 end
 
 function SC.set_speed(id, val) engine[id==1 and "speedL" or "speedR"](val) end
@@ -26,6 +33,7 @@ function SC.set_bitdepth(id, val) engine[id==1 and "bitDepthL" or "bitDepthR"](v
 function SC.set_dolby(id, val) engine[id==1 and "dolbyL" or "dolbyR"](val) end
 function SC.set_filter(id, val) engine[id==1 and "filtL" or "filtR"](val) end
 function SC.set_amp(id, val) engine[id==1 and "ampL" or "ampR"](val) end
+function SC.set_pan(id, val) engine[id==1 and "panL" or "panR"](val) end
 
 function SC.set_petal_freq(id, val) engine["p"..id.."f"](val) end
 function SC.set_petal_chaos(id, val) engine["p"..id.."chaos"](val) end
