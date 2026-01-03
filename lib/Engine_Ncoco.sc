@@ -1,29 +1,39 @@
-// Engine_Ncoco.sc v600 (GOLD MASTER - FIXED LOGIC)
+// Engine_Ncoco.sc v2002
+// CHANGELOG v2002:
+// 1. SMART READ: 'read_tape' now truncates files > 60s to fit the buffer.
+//    Logic: Buffer.read(..., numFrames: 2880000).
+// 2. ARCHITECTURE: Avant-style temp buffer + copyData maintained.
+
 Engine_Ncoco : CroneEngine {
 	var <synth;
 	var <bufL, <bufR;
 	var <osc_responder; 
+	var <norns_addr;
 
 	*new { arg context, doneCallback;
 		^super.new(context, doneCallback);
 	}
 
 	alloc {
+		// FIXED 60s BUFFER (The "Canvas")
 		bufL = Buffer.alloc(context.server, 48000 * 60, 1);
 		bufR = Buffer.alloc(context.server, 48000 * 60, 1);
+		norns_addr = NetAddr("127.0.0.1", 10111);
+		
 		context.server.sync;
 		bufL.zero; bufR.zero;
 		context.server.sync;
 
 		SynthDef(\NcocoDSP, {
 			arg out, inL, inR, bufL, bufR,
-			recL=0, recR=0, fbL=0.8, fbR=0.8, speedL=1.0, speedR=1.0,     
-			flipL=1, flipR=1, skipL=0, skipR=0,           
-			volInL=1.0, volInR=1.0, volFbL=1.0, volFbR=1.0,     
-			filtL=15000, filtR=15000, ampL=1.0, ampR=1.0,
+			recL=0, recR=0, fbL=0.85, fbR=0.85, speedL=1.0, speedR=1.0,     
+			flipL=0, flipR=0, skipL=0, skipR=0,           
+			volInL=1.0, volInR=1.0,     
+			filtL=0, filtR=0, ampL=1.0, ampR=1.0,
+			panL= -0.5, panR=0.5,
 			
 			bitDepthL=8, bitDepthR=8, interp=2,                   
-			dolbyL=0, dolbyR=0, loopLen=8.0,
+			dolbyL=0, dolbyR=0, loopLen=8.0, skipMode=0,
 			preampL=1.0, preampR=1.0, envSlewL=0.05, envSlewR=0.05,
 
 			p1f=0.5, p2f=0.6, p3f=0.7, p4f=0.8, p5f=0.9, p6f=1.0,
@@ -32,177 +42,303 @@ Engine_Ncoco : CroneEngine {
 			
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
 
-			// --- NAMED CONTROLS (CRITICAL FOR MODULATION) ---
-			var mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!8);
-			var mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!8);
-			var mod_flipL_Amts=NamedControl.kr(\mod_flipL_Amts, 0!8);
-			var mod_flipR_Amts=NamedControl.kr(\mod_flipR_Amts, 0!8);
-			var mod_skipL_Amts=NamedControl.kr(\mod_skipL_Amts, 0!8);
-			var mod_skipR_Amts=NamedControl.kr(\mod_skipR_Amts, 0!8);
-			var mod_ampL_Amts=NamedControl.kr(\mod_ampL_Amts, 0!8);
-			var mod_ampR_Amts=NamedControl.kr(\mod_ampR_Amts, 0!8);
-			var mod_fbL_Amts=NamedControl.kr(\mod_fbL_Amts, 0!8);
-			var mod_fbR_Amts=NamedControl.kr(\mod_fbR_Amts, 0!8);
-			var mod_filtL_Amts=NamedControl.kr(\mod_filtL_Amts, 0!8);
-			var mod_filtR_Amts=NamedControl.kr(\mod_filtR_Amts, 0!8);
-			var mod_recL_Amts=NamedControl.kr(\mod_recL_Amts, 0!8);
-			var mod_recR_Amts=NamedControl.kr(\mod_recR_Amts, 0!8);
-			var mod_p1_Amts=NamedControl.kr(\mod_p1_Amts, 0!8);
-			var mod_p2_Amts=NamedControl.kr(\mod_p2_Amts, 0!8);
-			var mod_p3_Amts=NamedControl.kr(\mod_p3_Amts, 0!8);
-			var mod_p4_Amts=NamedControl.kr(\mod_p4_Amts, 0!8);
-			var mod_p5_Amts=NamedControl.kr(\mod_p5_Amts, 0!8);
-			var mod_p6_Amts=NamedControl.kr(\mod_p6_Amts, 0!8);
+			// --- VARS ---
+			var dest_gains;
+			var mod_speedL_Amts, mod_speedR_Amts;
+			var mod_flipL_Amts, mod_flipR_Amts;
+			var mod_skipL_Amts, mod_skipR_Amts;
+			var mod_ampL_Amts, mod_ampR_Amts;
+			var mod_fbL_Amts, mod_fbR_Amts;
+			var mod_filtL_Amts, mod_filtR_Amts;
+			var mod_recL_Amts, mod_recR_Amts;
+			var mod_p1_Amts, mod_p2_Amts, mod_p3_Amts, mod_p4_Amts, mod_p5_Amts, mod_p6_Amts;
 
 			var inputL_sig, inputR_sig, envL, envR;
-			var p1, p2, p3, p4, p5, p6, c1, c2, c3, c4, c5, c6; 
+			var p1, p2, p3, p4, p5, p6;
+			var c1, c2, c3, c4, c5, c6; 
+			var b_ph1, b_ph2, b_ph3, b_ph4, b_ph5, b_ph6; 
+			var t1, t2, t3, t4, t5, t6; 
 			var out1, out2, out3, out4, out5, out6;
 			var fb_mod, sources_sig; 
+			
 			var mod_val_speedL, mod_val_speedR, mod_val_flipL, mod_val_flipR;
 			var mod_val_skipL, mod_val_skipR, mod_val_ampL, mod_val_ampR;
 			var mod_val_fbL, mod_val_fbR, mod_val_filtL, mod_val_filtR;
 			var mod_val_recL, mod_val_recR;
 			var mod_p1, mod_p2, mod_p3, mod_p4, mod_p5, mod_p6;
+			
 			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR;
 			var trigSkipL, trigSkipR, readL, readR, writeL, writeR;
-			var envInL, envFbL, dolby_gainL, envInR, envFbR, dolby_gainR;
-			var gateRecL, gateRecR, effFlipL, effFlipR, osc_trigger;
+			var gateRecL, gateRecR; 
 			var noiseL, noiseR, baseSR_L, baseSR_R, interpL, interpR;
-			var is8L, is12L, is8R, is12R;
-			var filtFreqL_LP, filtFreqL_HP, filtFreqR_LP, filtFreqR_HP;
-			var endL, endR, feedbackL, feedbackR;
+			var is8L, is12L, is8R, is12R, fixedFiltFreq;
+			var endL, endR;
+			var jumpTrigL, jumpTrigR;
+			var yellowL, yellowR;
+			var totalFiltL, totalFiltR;
+			
+			var d_lin_inL, d_exp_inL, d_duck_inL;
+			var d_lin_fbL, d_exp_fbL, d_duck_fbL;
+			var d_lin_inR, d_exp_inR, d_duck_inR;
+			var d_lin_fbR, d_exp_fbR, d_duck_fbR;
+			var gainInL, gainFbL, gainInR, gainFbR;
+			var envFbL, envFbR;
+			
+			var driftL, driftR, bleedL, bleedR;
+			var baseSpeedL, baseSpeedR;
+			var flipLogicL, flipLogicR; 
+			var flipStateL, flipStateR;
+			var recLogicL, recLogicR;
+			var feedbackL, feedbackR;
+			var osc_trigger; 
+
+			var feedback_in, fb_petals, fb_yellow;
+
+			// --- DSP ---
+
+			dest_gains = NamedControl.kr(\dest_gains, 1!20);
+			
+			mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!10);
+			mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!10);
+			mod_flipL_Amts=NamedControl.kr(\mod_flipL_Amts, 0!10);
+			mod_flipR_Amts=NamedControl.kr(\mod_flipR_Amts, 0!10);
+			mod_skipL_Amts=NamedControl.kr(\mod_skipL_Amts, 0!10);
+			mod_skipR_Amts=NamedControl.kr(\mod_skipR_Amts, 0!10);
+			mod_ampL_Amts=NamedControl.kr(\mod_ampL_Amts, 0!10);
+			mod_ampR_Amts=NamedControl.kr(\mod_ampR_Amts, 0!10);
+			mod_fbL_Amts=NamedControl.kr(\mod_fbL_Amts, 0!10);
+			mod_fbR_Amts=NamedControl.kr(\mod_fbR_Amts, 0!10);
+			mod_filtL_Amts=NamedControl.kr(\mod_filtL_Amts, 0!10);
+			mod_filtR_Amts=NamedControl.kr(\mod_filtR_Amts, 0!10);
+			mod_recL_Amts=NamedControl.kr(\mod_recL_Amts, 0!10);
+			mod_recR_Amts=NamedControl.kr(\mod_recR_Amts, 0!10);
+			mod_p1_Amts=NamedControl.kr(\mod_p1_Amts, 0!10);
+			mod_p2_Amts=NamedControl.kr(\mod_p2_Amts, 0!10);
+			mod_p3_Amts=NamedControl.kr(\mod_p3_Amts, 0!10);
+			mod_p4_Amts=NamedControl.kr(\mod_p4_Amts, 0!10);
+			mod_p5_Amts=NamedControl.kr(\mod_p5_Amts, 0!10);
+			mod_p6_Amts=NamedControl.kr(\mod_p6_Amts, 0!10);
+
+			feedback_in = LocalIn.ar(8);
+			fb_petals = feedback_in[0..5].tanh; 
+			fb_yellow = feedback_in[6..7]; 
 
 			inputL_sig = In.ar(inL); inputR_sig = In.ar(inR);
 			inputL_sig = (inputL_sig * preampL).tanh; inputR_sig = (inputR_sig * preampR).tanh;
-			envL = Amplitude.kr(inputL_sig, 0.05, envSlewL); envR = Amplitude.kr(inputR_sig, 0.05, envSlewR);
+			
+			envL = Amplitude.kr(inputL_sig, 0.01, 0.08); 
+			envR = Amplitude.kr(inputR_sig, 0.01, 0.08);
 
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
-			noiseL = PinkNoise.ar((is8L * 0.0039) + (is12L * 0.00025));
-			noiseR = PinkNoise.ar((is8R * 0.0039) + (is12R * 0.00025));
-			baseSR_L = (is8L * 22050) + (is12L * 32000) + ((1 - is8L - is12L) * 48000);
-			baseSR_R = (is8R * 22050) + (is12R * 32000) + ((1 - is8R - is12R) * 48000);
+			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.00025));
+			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.00025));
+			baseSR_L = (is8L * 16000) + (is12L * 24000) + ((1 - is8L - is12L) * 32000);
+			baseSR_R = (is8R * 16000) + (is12R * 24000) + ((1 - is8R - is12R) * 32000);
+			fixedFiltFreq = (is8L * 7000) + (is12L * 11000) + ((1 - is8L - is12L) * 16000);
 			interpL = 1 + (1 - is8L); interpR = 1 + (1 - is8R);
 			inputL_sig = inputL_sig + noiseL; inputR_sig = inputR_sig + noiseR;
 
-			fb_mod = LocalIn.ar(6); 
-			sources_sig = [fb_mod[0], fb_mod[1], fb_mod[2], fb_mod[3], fb_mod[4], fb_mod[5], K2A.ar(envL*2-1), K2A.ar(envR*2-1)];
+			yellowL = DC.ar(0); yellowR = DC.ar(0);
+			sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 			
-			mod_p1=(sources_sig*mod_p1_Amts).sum*10; mod_p2=(sources_sig*mod_p2_Amts).sum*10;
-			mod_p3=(sources_sig*mod_p3_Amts).sum*10; mod_p4=(sources_sig*mod_p4_Amts).sum*10;
-			mod_p5=(sources_sig*mod_p5_Amts).sum*10; mod_p6=(sources_sig*mod_p6_Amts).sum*10;
+			mod_p1=((sources_sig*mod_p1_Amts).sum * dest_gains[14] * 10);
+			mod_p2=((sources_sig*mod_p2_Amts).sum * dest_gains[15] * 10);
+			mod_p3=((sources_sig*mod_p3_Amts).sum * dest_gains[16] * 10);
+			mod_p4=((sources_sig*mod_p4_Amts).sum * dest_gains[17] * 10);
+			mod_p5=((sources_sig*mod_p5_Amts).sum * dest_gains[18] * 10);
+			mod_p6=((sources_sig*mod_p6_Amts).sum * dest_gains[19] * 10);
 
-			p1=LFTri.ar(p1f+mod_p1,(fb_mod[5]*p1chaos*20).clip(-4,4)); p2=LFTri.ar(p2f+mod_p2,(p1*p2chaos*20).clip(-4,4));
-			p3=LFTri.ar(p3f+mod_p3,(p2*p3chaos*20).clip(-4,4)); p4=LFTri.ar(p4f+mod_p4,(p3*p4chaos*20).clip(-4,4));
-			p5=LFTri.ar(p5f+mod_p5,(p4*p5chaos*20).clip(-4,4)); p6=LFTri.ar(p6f+mod_p6,(p5*p6chaos*20).clip(-4,4));
+			b_ph1 = Phasor.ar(0, (p1f + mod_p1).abs * SampleDur.ir, 0, 1);
+			t1 = Trig1.ar(b_ph1 > 0.05, SampleDur.ir); 
+			p1 = ((b_ph1 + (fb_petals[5] * p1chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
+
+			b_ph2 = Phasor.ar(0, (p2f + mod_p2).abs * SampleDur.ir, 0, 1);
+			t2 = Trig1.ar(b_ph2 > 0.05, SampleDur.ir);
+			p2 = ((b_ph2 + (p1 * p2chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
+
+			b_ph3 = Phasor.ar(0, (p3f + mod_p3).abs * SampleDur.ir, 0, 1);
+			t3 = Trig1.ar(b_ph3 > 0.05, SampleDur.ir);
+			p3 = ((b_ph3 + (p2 * p3chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
+
+			b_ph4 = Phasor.ar(0, (p4f + mod_p4).abs * SampleDur.ir, 0, 1);
+			t4 = Trig1.ar(b_ph4 > 0.05, SampleDur.ir);
+			p4 = ((b_ph4 + (p3 * p4chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
+
+			b_ph5 = Phasor.ar(0, (p5f + mod_p5).abs * SampleDur.ir, 0, 1);
+			t5 = Trig1.ar(b_ph5 > 0.05, SampleDur.ir);
+			p5 = ((b_ph5 + (p4 * p5chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
+
+			b_ph6 = Phasor.ar(0, (p6f + mod_p6).abs * SampleDur.ir, 0, 1);
+			t6 = Trig1.ar(b_ph6 > 0.05, SampleDur.ir);
+			p6 = ((b_ph6 + (p5 * p6chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
 			
-			c1=Latch.ar(p6,p1).slew(500,500); c2=Latch.ar(p1,p2).slew(500,500); c3=Latch.ar(p2,p3).slew(500,500);
-			c4=Latch.ar(p3,p4).slew(500,500); c5=Latch.ar(p4,p5).slew(500,500); c6=Latch.ar(p5,p6).slew(500,500);
+			c1=Latch.ar(p6,t1); c2=Latch.ar(p1,t2); c3=Latch.ar(p2,t3);
+			c4=Latch.ar(p3,t4); c5=Latch.ar(p4,t5); c6=Latch.ar(p5,t6);
 			
 			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
 			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
-			LocalOut.ar([p1,p2,p3,p4,p5,p6]); 
-			sources_sig = [out1, out2, out3, out4, out5, out6, K2A.ar(envL*2-1), K2A.ar(envR*2-1)];
+			
+			sources_sig = [out1, out2, out3, out4, out5, out6, K2A.ar(envL*2-1), K2A.ar(envR*2-1), fb_yellow[0], fb_yellow[1]];
 
-			// Matrix - SENSITIVE
-			mod_val_speedL=(sources_sig*mod_speedL_Amts).sum.tanh.lag(slew_speed);
-			mod_val_speedR=(sources_sig*mod_speedR_Amts).sum.tanh.lag(slew_speed);
-			mod_val_ampL=(sources_sig*mod_ampL_Amts).sum.tanh.lag(slew_amp);
-			mod_val_ampR=(sources_sig*mod_ampR_Amts).sum.tanh.lag(slew_amp);
-			mod_val_fbL=(sources_sig*mod_fbL_Amts).sum.tanh.lag(slew_amp);
-			mod_val_fbR=(sources_sig*mod_fbR_Amts).sum.tanh.lag(slew_amp);
-			mod_val_filtL=(sources_sig*mod_filtL_Amts).sum.tanh.lag(slew_misc);
-			mod_val_filtR=(sources_sig*mod_filtR_Amts).sum.tanh.lag(slew_misc);
-			
-			mod_val_flipL=Schmidt.ar((sources_sig*mod_flipL_Amts).sum, 0.1, 0.05);
-			mod_val_flipR=Schmidt.ar((sources_sig*mod_flipR_Amts).sum, 0.1, 0.05);
-			mod_val_skipL=Schmidt.ar((sources_sig*mod_skipL_Amts).sum, 0.1, 0.05);
-			mod_val_skipR=Schmidt.ar((sources_sig*mod_skipR_Amts).sum, 0.1, 0.05);
-			mod_val_recL=Schmidt.ar((sources_sig*mod_recL_Amts).sum, 0.1, 0.05);
-			mod_val_recR=Schmidt.ar((sources_sig*mod_recR_Amts).sum, 0.1, 0.05);
+			driftL = LFNoise2.kr(0.5, 0.005); 
+			driftR = LFNoise2.kr(0.5, 0.005);
 
-			// --- COCO LOGIC ---
+			mod_val_speedL=((sources_sig*mod_speedL_Amts).sum * dest_gains[0]).tanh.lag(0.01);
+			mod_val_speedR=((sources_sig*mod_speedR_Amts).sum * dest_gains[7]).tanh.lag(0.01);
 			
-			// Rec Gate Logic: REC only gates the INPUT
-			gateRecL = ((recL + mod_val_recL) > 0.5).lag(0.01);
-			gateRecR = ((recR + mod_val_recR) > 0.5).lag(0.01);
-			dryL = inputL_sig * (volInL + mod_val_ampL).clip(0, 2) * gateRecL; // Gated Input
-			dryR = inputR_sig * (volInR + mod_val_ampR).clip(0, 2) * gateRecR;
+			mod_val_ampL=((sources_sig*mod_ampL_Amts).sum * dest_gains[1]).tanh.lag(slew_amp);
+			mod_val_ampR=((sources_sig*mod_ampR_Amts).sum * dest_gains[8]).tanh.lag(slew_amp);
+			mod_val_fbL=((sources_sig*mod_fbL_Amts).sum * dest_gains[2]).tanh.lag(slew_amp);
+			mod_val_fbR=((sources_sig*mod_fbR_Amts).sum * dest_gains[9]).tanh.lag(slew_amp);
+			mod_val_filtL=((sources_sig*mod_filtL_Amts).sum * dest_gains[3]).tanh.lag(slew_misc);
+			mod_val_filtR=((sources_sig*mod_filtR_Amts).sum * dest_gains[10]).tanh.lag(slew_misc);
 			
-			effFlipL = flipL * Select.ar(mod_val_flipL, [K2A.ar(1), K2A.ar(-1)]);
-			effFlipR = flipR * Select.ar(mod_val_flipR, [K2A.ar(1), K2A.ar(-1)]);
+			// USE RAW SUM FOR FLIP LOGIC
+			mod_val_flipL = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
+			mod_val_flipR = (sources_sig*mod_flipR_Amts).sum * dest_gains[11];
 			
-			finalRateL = (speedL + mod_val_speedL).lag(0.05) * effFlipL;
-			finalRateR = (speedR + mod_val_speedR).lag(0.05) * effFlipR;
+			mod_val_skipL=Schmidt.ar((sources_sig*mod_skipL_Amts).sum * dest_gains[5], 0.6, 0.4);
+			mod_val_skipR=Schmidt.ar((sources_sig*mod_skipR_Amts).sum * dest_gains[12], 0.6, 0.4);
+			mod_val_recL=Schmidt.ar((sources_sig*mod_recL_Amts).sum * dest_gains[6], 0.6, 0.4);
+			mod_val_recR=Schmidt.ar((sources_sig*mod_recR_Amts).sum * dest_gains[13], 0.6, 0.4);
+
+			// REC XOR LOGIC 
+			recLogicL = (recL + mod_val_recL).mod(2);
+			recLogicR = (recR + mod_val_recR).mod(2);
+			gateRecL = Select.ar(recLogicL > 0.5, [K2A.ar(0), K2A.ar(1)]);
+			gateRecR = Select.ar(recLogicR > 0.5, [K2A.ar(0), K2A.ar(1)]);
+
+			dryL = inputL_sig * (volInL + mod_val_ampL).clip(0, 2);
+			dryR = inputR_sig * (volInR + mod_val_ampR).clip(0, 2);
 			
-			endL = BufFrames.kr(bufL) * (loopLen/60);
-			endR = BufFrames.kr(bufR) * (loopLen/60);
-			ptrL = Phasor.ar(0, finalRateL * BufRateScale.kr(bufL), 0, endL);
-			ptrR = Phasor.ar(0, finalRateR * BufRateScale.kr(bufR), 0, endR);
+			// FLIP HARD SWITCH (BINARY)
+			baseSpeedL = (speedL + mod_val_speedL + driftL).lag(0.01);
+			baseSpeedR = (speedR + mod_val_speedR + driftR).lag(0.01);
+
+			// LOGIC: (Manual + (Mod > 0.1)) % 2
+			flipLogicL = (flipL + (mod_val_flipL > 0.1)).mod(2);
+			flipLogicR = (flipR + (mod_val_flipR > 0.1)).mod(2);
+
+			flipStateL = flipLogicL;
+			flipStateR = flipLogicR;
+
+			finalRateL = Select.ar(flipLogicL > 0.5, [baseSpeedL, baseSpeedL * -1]);
+			finalRateR = Select.ar(flipLogicR > 0.5, [baseSpeedR, baseSpeedR * -1]);
 			
-			trigSkipL = (skipL + mod_val_skipL) > 0.5;
-			trigSkipR = (skipR + mod_val_skipR) > 0.5;
-			ptrL = ptrL + (trigSkipL * TRand.ar(0, 48000, Impulse.ar(15)));
-			ptrR = ptrR + (trigSkipR * TRand.ar(0, 48000, Impulse.ar(15)));
+			jumpTrigL = Changed.ar(skipL + mod_val_skipL);
+			jumpTrigR = Changed.ar(skipR + mod_val_skipR);
 			
+			// LOOP LOGIC (AVANT STYLE)
+			endL = (loopLen * 48000).min(BufFrames.kr(bufL));
+			endR = (loopLen * 48000).min(BufFrames.kr(bufR));
+			
+			ptrL = Phasor.ar(jumpTrigL, finalRateL * BufRateScale.kr(bufL), 0, endL, TRand.ar(0, endL, jumpTrigL));
+			ptrR = Phasor.ar(jumpTrigR, finalRateR * BufRateScale.kr(bufR), 0, endR, TRand.ar(0, endR, jumpTrigR));
+			
+			// POS OUTPUT
+			yellowL = (ptrL / endL);
+			yellowR = (ptrR / endR);
+			
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR]);
+
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * 0.001;
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * 0.001;
+
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
 			
-			envInL = Amplitude.kr(dryL, 0.01, 0.05); envFbL = Amplitude.kr(readL, 0.01, 0.05);
-			dolby_gainL = Select.kr(dolbyL, [DC.kr(1.0), envInL.linexp(0.001, 1, 0.1, 2.0), (1 / (envFbL + 0.01)).clip(0, 1)]);
-			// Note: We don't apply dolby to dryL here because dryL is input to tape. Dolby acts on output or pre-tape? 
-			// Original schematic: Input -> Dolby -> Tape.
-			// Let's apply Dolby Gain to the signal going to tape.
-			dryL = dryL * dolby_gainL;
+			envFbL = Amplitude.kr(readL, 0.01, 0.08); 
+			envFbR = Amplitude.kr(readR, 0.01, 0.08);
 			
-			envInR = Amplitude.kr(dryR, 0.01, 0.05); envFbR = Amplitude.kr(readR, 0.01, 0.05);
-			dolby_gainR = Select.kr(dolbyR, [DC.kr(1.0), envInR.linexp(0.001, 1, 0.1, 2.0), (1 / (envFbR + 0.01)).clip(0, 1)]);
-			dryR = dryR * dolby_gainR;
+			d_lin_inL = DC.kr(1.0);
+			d_exp_inL = envL.pow(2);
+			d_duck_inL = (1 - envFbL).clip(0,1);
+			d_lin_inR = DC.kr(1.0);
+			d_exp_inR = envR.pow(2);
+			d_duck_inR = (1 - envFbR).clip(0,1);
 
-			// FEEDBACK & WRITE
-			// Feedback is always running, modulated by FB knob/cv
-			feedbackL = readL * (fbL + mod_val_fbL).clip(0, 1.2) * 1.15; // Gain Comp
+			d_lin_fbL = DC.kr(1.0);
+			d_exp_fbL = envFbL.pow(2);
+			d_duck_fbL = (1 - envL).clip(0,1);
+			d_lin_fbR = DC.kr(1.0);
+			d_exp_fbR = envFbR.pow(2);
+			d_duck_fbR = (1 - envR).clip(0,1);
+
+			gainInL = Select.kr(dolbyL, [d_lin_inL, d_exp_inL, d_lin_inL, d_exp_inL, d_lin_inL, d_duck_inL, d_exp_inL, d_duck_inL, d_duck_inL]);
+			gainFbL = Select.kr(dolbyL, [d_lin_fbL, d_lin_fbL, d_exp_fbL, d_exp_fbL, d_duck_fbL, d_lin_fbL, d_duck_fbL, d_exp_fbL, d_duck_fbL]);
+			
+			gainInR = Select.kr(dolbyR, [d_lin_inR, d_exp_inR, d_lin_inR, d_exp_inR, d_lin_inR, d_duck_inR, d_exp_inR, d_duck_inR, d_duck_inR]);
+			gainFbR = Select.kr(dolbyR, [d_lin_fbR, d_lin_fbR, d_exp_fbR, d_exp_fbR, d_duck_fbR, d_lin_fbR, d_duck_fbR, d_exp_fbR, d_duck_fbR]);
+
+			feedbackL = readL * (fbL + mod_val_fbL).clip(0, 1.2) * 1.15;
 			feedbackR = readR * (fbR + mod_val_fbR).clip(0, 1.2) * 1.15;
+			feedbackL = LPF.ar(feedbackL, fixedFiltFreq).softclip;
+			feedbackR = LPF.ar(feedbackR, fixedFiltFreq).softclip;
 			
-			// FIXED FILTER in Feedback (7kHz)
-			feedbackL = LPF.ar(feedbackL, 7000).softclip;
-			feedbackR = LPF.ar(feedbackR, 7000).softclip;
+			writeL = (dryL * gainInL * gateRecL) + (feedbackL * gainFbL);
+			writeR = (dryR * gainInR * gateRecR) + (feedbackR * gainFbR);
 			
-			// SUM Input + Feedback
-			writeL = dryL + feedbackL;
-			writeR = dryR + feedbackR;
-			
-			// Bitcrush & SR Reduction
 			writeL = writeL.round(0.5 ** bitDepthL);
 			writeR = writeR.round(0.5 ** bitDepthR);
-			writeL = Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000)));
-			writeR = Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000)));
 			
-			// ALWAYS WRITE (Rec button only gated dryL)
+			writeL = Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(0.02))));
+			writeR = Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(0.02))));
+			
 			BufWr.ar(writeL, bufL, ptrL);
 			BufWr.ar(writeR, bufR, ptrR);
 			
-			// OUTPUT FILTER (Variable)
-			filtFreqL_LP = (filtL.min(0) + 1).linexp(0, 1, 100, 20000);
-			filtFreqL_HP = filtL.max(0).linexp(0, 1, 20, 15000);
-			readL = HPF.ar(LPF.ar(readL, filtFreqL_LP), filtFreqL_HP);
-			filtFreqR_LP = (filtR.min(0) + 1).linexp(0, 1, 100, 20000);
-			filtFreqR_HP = filtR.max(0).linexp(0, 1, 20, 15000);
-			readR = HPF.ar(LPF.ar(readR, filtFreqR_LP), filtFreqR_HP);
+			totalFiltL = (filtL + mod_val_filtL).clip(-1, 1);
+			totalFiltR = (filtR + mod_val_filtR).clip(-1, 1);
 
-			Out.ar(out, [readL * ampL, readR * ampR]);
+			readL = Select.ar(totalFiltL.abs < 0.05, [
+				HPF.ar(LPF.ar(readL, (totalFiltL.min(0)+1).linexp(0,1,100,20000)), totalFiltL.max(0).linexp(0,1,20,15000)),
+				readL
+			]);
+			readR = Select.ar(totalFiltR.abs < 0.05, [
+				HPF.ar(LPF.ar(readR, (totalFiltR.min(0)+1).linexp(0,1,100,20000)), totalFiltR.max(0).linexp(0,1,20,15000)),
+				readR
+			]);
+
+			Out.ar(out, Balance2.ar((readL + bleedL)*ampL, (readL + bleedL)*ampL, panL) + Balance2.ar((readR + bleedR)*ampR, (readR + bleedR)*ampR, panR));
 			
-			osc_trigger = Impulse.kr(15);
-			SendReply.kr(osc_trigger, '/update', [ptrL/endL, ptrR/endR, gateRecL, gateRecR, effFlipL, effFlipR, trigSkipL, trigSkipR, out1, out2, out3, out4, out5, out6, envL, envR]);
+			osc_trigger = Impulse.kr(30);
+			SendReply.kr(osc_trigger, '/update', [ptrL/endL, ptrR/endR, gateRecL, gateRecR, flipStateL, flipStateR, (skipL + mod_val_skipL).clip(0,1), (skipR + mod_val_skipR).clip(0,1), out1, out2, out3, out4, out5, out6, envL, envR, yellowL, yellowR, finalRateL, finalRateR, Amplitude.kr(readL*ampL), Amplitude.kr(readR*ampR)]);
 		}).add;
 
 		context.server.sync;
 		synth = Synth.new(\NcocoDSP, [\out, context.out_b.index, \bufL, bufL, \bufR, bufR, \inL, context.in_b[0].index, \inR, context.in_b[1].index], context.xg);
 		osc_responder = OSCFunc({ |msg| NetAddr("127.0.0.1", 10111).sendMsg("/update", *msg.drop(3)); }, '/update', context.server.addr).fix;
 
-		// (Copy all addCommands from previous version here - Standard block)
-		this.addCommand("write_tape", "isf", { |msg| var b=if(msg[1]==0,{bufL},{bufR}); b.write(msg[2],"wav","int16",0,msg[3]*48000) });
-		this.addCommand("read_tape", "is", { |msg| var b=if(msg[1]==0,{bufL},{bufR}); b.read(msg[2]) });
+		// COMMANDS
+		this.addCommand("clear_tape", "i", { |msg| var b=if(msg[1]==0,{bufL},{bufR}); b.zero; });
+		this.addCommand("dest_gains", "ffffffffffffffffffff", { |msg| synth.setn(\dest_gains, msg.drop(1)) });
+		
+		// AVANT STYLE WRITE: Only writes active loop length
+		this.addCommand("write_tape", "isf", { |msg| 
+			var b=if(msg[1]==1,{bufL},{bufR}); // 1=L, 2=R
+			var len_frames = (msg[3] * 48000).asInteger;
+			b.write(msg[2], "wav", "int16", numFrames: len_frames); 
+		});
+		
+		// AVANT STYLE READ (TRUNCATED): Read max 60s
+		this.addCommand("read_tape", "is", { |msg| 
+			var target_buf = if(msg[1]==1,{bufL},{bufR}); // 1=L, 2=R
+			var path = msg[2];
+			var maxFrames = target_buf.numFrames; // 60s
+			
+			if(File.exists(path)) {
+				// LIMIT READ TO MAXFRAMES to prevent buffer resize/overflow
+				Buffer.read(context.server, path, 0, maxFrames, action: { |temp|
+					temp.copyData(target_buf, 0, 0, temp.numFrames);
+					// Inform Lua about actual duration
+					norns_addr.sendMsg("/buffer_info", msg[1], temp.numFrames / 48000.0);
+					temp.free;
+				});
+			}
+		});
+
+		this.addCommand("skipMode", "i", { |msg| synth.set(\skipMode, msg[1]) });
 		this.addCommand("speedL", "f", { |msg| synth.set(\speedL, msg[1]) });
 		this.addCommand("speedR", "f", { |msg| synth.set(\speedR, msg[1]) });
 		this.addCommand("fbL", "f", { |msg| synth.set(\fbL, msg[1]) });
@@ -223,6 +359,8 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("filtR", "f", { |msg| synth.set(\filtR, msg[1]) });
 		this.addCommand("ampL", "f", { |msg| synth.set(\ampL, msg[1]) });
 		this.addCommand("ampR", "f", { |msg| synth.set(\ampR, msg[1]) });
+		this.addCommand("panL", "f", { |msg| synth.set(\panL, msg[1]) });
+		this.addCommand("panR", "f", { |msg| synth.set(\panR, msg[1]) });
 		this.addCommand("slew_speed", "f", { |msg| synth.set(\slew_speed, msg[1]) });
 		this.addCommand("loopLen", "f", { |msg| synth.set(\loopLen, msg[1]) });
 		this.addCommand("preampL", "f", { |msg| synth.set(\preampL, msg[1]) });
@@ -247,27 +385,26 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("p4shape", "f", { |msg| synth.set(\p4shape, msg[1]) });
 		this.addCommand("p5shape", "f", { |msg| synth.set(\p5shape, msg[1]) });
 		this.addCommand("p6shape", "f", { |msg| synth.set(\p6shape, msg[1]) });
-		
-		this.addCommand("mod_speedL", "ffffffff", { |msg| synth.setn(\mod_speedL_Amts, msg.drop(1)) });
-		this.addCommand("mod_speedR", "ffffffff", { |msg| synth.setn(\mod_speedR_Amts, msg.drop(1)) });
-		this.addCommand("mod_flipL", "ffffffff", { |msg| synth.setn(\mod_flipL_Amts, msg.drop(1)) });
-		this.addCommand("mod_flipR", "ffffffff", { |msg| synth.setn(\mod_flipR_Amts, msg.drop(1)) });
-		this.addCommand("mod_skipL", "ffffffff", { |msg| synth.setn(\mod_skipL_Amts, msg.drop(1)) });
-		this.addCommand("mod_skipR", "ffffffff", { |msg| synth.setn(\mod_skipR_Amts, msg.drop(1)) });
-		this.addCommand("mod_ampL", "ffffffff", { |msg| synth.setn(\mod_ampL_Amts, msg.drop(1)) });
-		this.addCommand("mod_ampR", "ffffffff", { |msg| synth.setn(\mod_ampR_Amts, msg.drop(1)) });
-		this.addCommand("mod_fbL", "ffffffff", { |msg| synth.setn(\mod_fbL_Amts, msg.drop(1)) });
-		this.addCommand("mod_fbR", "ffffffff", { |msg| synth.setn(\mod_fbR_Amts, msg.drop(1)) });
-		this.addCommand("mod_filtL", "ffffffff", { |msg| synth.setn(\mod_filtL_Amts, msg.drop(1)) });
-		this.addCommand("mod_filtR", "ffffffff", { |msg| synth.setn(\mod_filtR_Amts, msg.drop(1)) });
-		this.addCommand("mod_recL", "ffffffff", { |msg| synth.setn(\mod_recL_Amts, msg.drop(1)) });
-		this.addCommand("mod_recR", "ffffffff", { |msg| synth.setn(\mod_recR_Amts, msg.drop(1)) });
-		this.addCommand("mod_p1", "ffffffff", { |msg| synth.setn(\mod_p1_Amts, msg.drop(1)) });
-		this.addCommand("mod_p2", "ffffffff", { |msg| synth.setn(\mod_p2_Amts, msg.drop(1)) });
-		this.addCommand("mod_p3", "ffffffff", { |msg| synth.setn(\mod_p3_Amts, msg.drop(1)) });
-		this.addCommand("mod_p4", "ffffffff", { |msg| synth.setn(\mod_p4_Amts, msg.drop(1)) });
-		this.addCommand("mod_p5", "ffffffff", { |msg| synth.setn(\mod_p5_Amts, msg.drop(1)) });
-		this.addCommand("mod_p6", "ffffffff", { |msg| synth.setn(\mod_p6_Amts, msg.drop(1)) });
+		this.addCommand("mod_speedL", "ffffffffff", { |msg| synth.setn(\mod_speedL_Amts, msg.drop(1)) });
+		this.addCommand("mod_speedR", "ffffffffff", { |msg| synth.setn(\mod_speedR_Amts, msg.drop(1)) });
+		this.addCommand("mod_flipL", "ffffffffff", { |msg| synth.setn(\mod_flipL_Amts, msg.drop(1)) });
+		this.addCommand("mod_flipR", "ffffffffff", { |msg| synth.setn(\mod_flipR_Amts, msg.drop(1)) });
+		this.addCommand("mod_skipL", "ffffffffff", { |msg| synth.setn(\mod_skipL_Amts, msg.drop(1)) });
+		this.addCommand("mod_skipR", "ffffffffff", { |msg| synth.setn(\mod_skipR_Amts, msg.drop(1)) });
+		this.addCommand("mod_ampL", "ffffffffff", { |msg| synth.setn(\mod_ampL_Amts, msg.drop(1)) });
+		this.addCommand("mod_ampR", "ffffffffff", { |msg| synth.setn(\mod_ampR_Amts, msg.drop(1)) });
+		this.addCommand("mod_fbL", "ffffffffff", { |msg| synth.setn(\mod_fbL_Amts, msg.drop(1)) });
+		this.addCommand("mod_fbR", "ffffffffff", { |msg| synth.setn(\mod_fbR_Amts, msg.drop(1)) });
+		this.addCommand("mod_filtL", "ffffffffff", { |msg| synth.setn(\mod_filtL_Amts, msg.drop(1)) });
+		this.addCommand("mod_filtR", "ffffffffff", { |msg| synth.setn(\mod_filtR_Amts, msg.drop(1)) });
+		this.addCommand("mod_recL", "ffffffffff", { |msg| synth.setn(\mod_recL_Amts, msg.drop(1)) });
+		this.addCommand("mod_recR", "ffffffffff", { |msg| synth.setn(\mod_recR_Amts, msg.drop(1)) });
+		this.addCommand("mod_p1", "ffffffffff", { |msg| synth.setn(\mod_p1_Amts, msg.drop(1)) });
+		this.addCommand("mod_p2", "ffffffffff", { |msg| synth.setn(\mod_p2_Amts, msg.drop(1)) });
+		this.addCommand("mod_p3", "ffffffffff", { |msg| synth.setn(\mod_p3_Amts, msg.drop(1)) });
+		this.addCommand("mod_p4", "ffffffffff", { |msg| synth.setn(\mod_p4_Amts, msg.drop(1)) });
+		this.addCommand("mod_p5", "ffffffffff", { |msg| synth.setn(\mod_p5_Amts, msg.drop(1)) });
+		this.addCommand("mod_p6", "ffffffffff", { |msg| synth.setn(\mod_p6_Amts, msg.drop(1)) });
 	}
 
 	free { osc_responder.free; synth.free; bufL.free; bufR.free; }
