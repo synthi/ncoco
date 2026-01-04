@@ -1,12 +1,10 @@
--- lib/param_set.lua v2017
--- CHANGELOG v2017:
--- 1. CURVES: Enforced 'lin' and step=0 for all continuous performance params.
---    This delegates curve shaping to ncoco.lua for 16n control.
+-- lib/param_set.lua v2025-FIX
+-- CHANGELOG v2025:
+-- 1. ADDED: Dolby Boost Option (Normal/High) to Coco Channels.
 
 local Params = {}
 
 function Params.init(SC, G)
-  -- 1. GLOBALS & TAPE
   params:add_separator("GLOBALS")
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
@@ -44,35 +42,28 @@ function Params.init(SC, G)
   for i=1, 2 do
     local s = (i==1) and "L" or "R"
     local num = (i==1) and "1" or "2"
-    params:add_group("COCO "..num, 13) 
+    params:add_group("COCO "..num, 14) 
     
-    -- VOLUME: Linear 0-2 (1.0 at center)
     params:add_control("vol_"..string.lower(s), "Volume "..num, controlspec.new(0, 2.0, "lin", 0, 1.0))
     params:set_action("vol_"..string.lower(s), function(x) SC.set_amp(i, x) end)
 
-    -- PREAMP: Linear 1-20
     params:add_control("preamp"..s, "Preamp "..num, controlspec.new(1.0, 20.0, "lin", 0, 1.0))
     params:set_action("preamp"..s, function(x) SC.set_preamp(i,x) end)
-    
     params:add_control("envSlew"..s, "Env Slew "..num, controlspec.new(0.001, 1.0, "exp", 0, 0.05))
     params:set_action("envSlew"..s, function(x) SC.set_env_slew(i,x) end)
     
-    -- SPEED: Linear -3 to 3
-    params:add_control("speed"..s, "Speed "..num, controlspec.new(-3.0, 3.0, "lin", 0, 1.0))
+    params:add_control("speed"..s, "Speed "..num, controlspec.new(0.001, 3.0, "lin", 0, 1.0))
     params:set_action("speed"..s, function(x) SC.set_speed(i, x) end)
     
-    -- SPEED OFFSET: Linear -0.5 to 0.5 (Center 0)
     params:add_control("speed_offset"..s, "Speed Offset "..num, controlspec.new(-0.5, 0.5, "lin", 0, 0.0))
     params:set_action("speed_offset"..s, function(offset) 
        local base = G.coco[i].base_speed or 1.0
        params:set("speed"..s, base + offset)
     end)
     
-    -- FEEDBACK: Linear 0-1.2 (Curved by 16n logic)
     params:add_control("fb"..s, "Feedback "..num, controlspec.new(0, 1.2, "lin", 0, 0.85))
     params:set_action("fb"..s, function(x) SC.set_feedback(i,x) end)
     
-    -- FILTER: Linear -1 to 1 (Center 0)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
@@ -85,6 +76,10 @@ function Params.init(SC, G)
     local dolby_opts = {"Off", "Gate In", "Gate Fb", "Gate All", "Punch In", "Punch Out", "G-In/P-In", "P-Out/G-Fb", "Cross Duck"}
     params:add_option("dolby"..s, "Dolby "..num, dolby_opts, 5) 
     params:set_action("dolby"..s, function(x) SC.set_dolby(i, x-1) end)
+    
+    -- NEW OPTION
+    params:add_option("dolby_boost"..s, "Dolby "..num.." Boost", {"Normal", "High"}, 1)
+    params:set_action("dolby_boost"..s, function(x) SC.set_dolby_boost(i, x-1) end)
     
     params:add_binary("rec"..s, "Rec "..num, "toggle", 0)
     params:set_action("rec"..s, function(x) SC.set_rec(i,x) end)
