@@ -1,6 +1,6 @@
--- lib/sc_utils.lua v2008
--- CHANGELOG v2008:
--- 1. ADDED: mod_volL (21) and mod_volR (22).
+-- lib/sc_utils.lua v2025-FIX
+-- CHANGELOG v2025:
+-- 1. COMMAND: Added set_dolby_boost wrapper.
 
 local SC = {}
 
@@ -43,5 +43,11 @@ function SC.set_petal_shape(id, val) engine["p"..id.."shape"](val) end
 function SC.set_preamp(id, val) engine[id==1 and "preampL" or "preampR"](val) end
 function SC.set_env_slew(id, val) engine[id==1 and "envSlewL" or "envSlewR"](val) end
 function SC.set_loop_len(val) engine.loopLen(val) end
+
+-- NEW: Dolby Boost Command
+function SC.set_dolby_boost(id, val) 
+    local cmd = (id==1) and "dolbyBoostL" or "dolbyBoostR"
+    if engine[cmd] then engine[cmd](val) end
+end
 
 return SC
