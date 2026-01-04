@@ -1,7 +1,6 @@
--- lib/ui.lua v1027
--- CHANGELOG v1027:
--- 1. LAYOUT: Radars moved down +3px (Y: 35->38).
--- 2. METERS: Max height reduced by 5px (Mult: 36->31).
+-- lib/ui.lua v2012
+-- CHANGELOG v2012:
+-- 1. POPUP: Added draw_popup function for 16n value display.
 
 local Q = include('ncoco/lib/quantussy')
 local UI = {}
@@ -10,7 +9,8 @@ local SRC_NAMES = {"PETAL 1","PETAL 2","PETAL 3","PETAL 4","PETAL 5","PETAL 6","
 local DST_NAMES = {
   [1]="SPD 1",[2]="AMP 1",[3]="FB 1",[4]="FILT 1",[5]="FLIP 1",[6]="SKIP 1",[7]="REC 1",
   [8]="SPD 2",[9]="AMP 2",[10]="FB 2",[11]="FILT 2",[12]="FLIP 2",[13]="SKIP 2",[14]="REC 2",
-  [15]="P1 FRQ",[16]="P2 FRQ",[17]="P3 FRQ",[18]="P4 FRQ",[19]="P5 FRQ",[20]="P6 FRQ"
+  [15]="P1 FRQ",[16]="P2 FRQ",[17]="P3 FRQ",[18]="P4 FRQ",[19]="P5 FRQ",[20]="P6 FRQ",
+  [21]="VOL 1", [22]="VOL 2"
 }
 local DLB_NAMES = {
   [1]="OFF", [2]="G-IN", [3]="G-FB", 
@@ -18,8 +18,6 @@ local DLB_NAMES = {
   [7]="GI/PI", [8]="PO/GF", [9]="X-DUCK"
 }
 local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="16bit"}
-
-local function get_trail(G, id) if not G.trails[id] then G.trails[id]={} end; return G.trails[id] end
 
 function UI.update_histories(G)
   for i=1, 2 do
@@ -55,6 +53,28 @@ function UI.draw_scope(G, id, x, y, w, h, scale)
   screen.stroke()
 end
 
+function UI.draw_popup(G)
+  if G.popup.active then
+    if util.time() > G.popup.deadline then 
+       G.popup.active = false
+    else 
+      -- Draw Black Box at bottom
+      screen.level(0)
+      screen.rect(10, 50, 108, 12) 
+      screen.fill()
+      
+      -- Border
+      screen.level(15)
+      screen.rect(10, 50, 108, 12)
+      screen.stroke()
+      
+      -- Text
+      screen.move(64, 58)
+      screen.text_center(G.popup.name .. ": " .. G.popup.value) 
+    end
+  end
+end
+
 function UI.draw_main(G)
   if (G.sources_val[7] > 0.95) or (G.sources_val[8] > 0.95) then screen.level(15); screen.rect(0,0,128,64); screen.stroke() end
 
@@ -69,11 +89,9 @@ function UI.draw_main(G)
   if G.focus.inspect_dest then UI.draw_dest_inspector(G, G.focus.inspect_dest); return end
 
   Q.draw(G) 
-  -- MOVED DOWN 3px (35 -> 38)
   UI.draw_coco_radar(G, 1, 38, 50, 1)   
   UI.draw_coco_radar(G, 78, 38, 49, 2)  
   
-  -- REDUCED METER HEIGHT (Multiplier 36 -> 31)
   local el = math.pow(G.sources_val[7] or 0, 0.25)
   local er = math.pow(G.sources_val[8] or 0, 0.25)
   screen.level(15)
@@ -89,19 +107,18 @@ function UI.draw_main(G)
   screen.level(3); screen.move(2, 8); screen.text("E1:VOL "); screen.level(15); screen.text(string.format("%.1f", params:get("global_vol") or 1))
   screen.level(3); screen.move(2, 60); screen.text("E2:SPD "); screen.level(15); screen.text(string.format("%.2f", G.coco[1].real_speed or 1))
   screen.level(3); screen.move(85, 60); screen.text("E3:CHS"); screen.level(15); screen.move(126, 60); screen.text_right(string.format("%.0f%%", params:get("global_chaos")*100))
+  
+  UI.draw_popup(G)
 end
 
 function UI.draw_dest_inspector(G, id)
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(64, 20); screen.text_center(DST_NAMES[id] or "DEST")
-  
   screen.level(3); screen.move(126, 10); screen.text_right("IN GAIN:"); screen.level(15)
   screen.move(126, 18); screen.text_right(string.format("%.2fx", G.dest_gains[id]))
-  
   screen.rect(10, 30, 108, 25); screen.stroke()
   
   if id==5 or id==6 or id==7 or id==12 or id==13 or id==14 then
-     -- THRESHOLD 0.6 of 25px = 15px from bottom. Y = 55 - 15 = 40.
      local thresh_y = 40
      screen.level(2)
      for tx=10, 118, 4 do screen.pixel(tx, thresh_y) end
@@ -121,13 +138,13 @@ function UI.draw_dest_inspector(G, id)
     screen.pixel(10 + w - x, py); screen.fill()
   end
   screen.level(4); screen.move(10, 62); screen.text("E3: IN GAIN")
+  UI.draw_popup(G)
 end
 
 function UI.draw_petal_inspector(G, id)
   local p_range = params:get("p"..id.."range") or 1
   local p_id = (p_range==1) and "p"..id.."f_lfo" or "p"..id.."f_aud"
   local p = params:get(p_id) or 0
-  
   local ch=params:get("p"..id.."chaos") or 0
   local shp_idx=params:get("p"..id.."shape") or 1
   local rng_idx=params:get("p"..id.."range") or 1
@@ -137,32 +154,31 @@ function UI.draw_petal_inspector(G, id)
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(5,10); screen.text(SRC_NAMES[id]); screen.move(120,10); screen.text_right(string.format("%.2f Hz", p))
   screen.rect(10,20,108,25); screen.stroke(); UI.draw_scope(G,id,10,20,108,25,1); 
-  
   screen.level(4); screen.move(10,55); screen.text("E2:FREQ"); 
   screen.move(64,55); screen.text("E3:CHAOS"); screen.level(15); screen.move(126,55); screen.text_right(string.format("%.2f", ch))
-  
   screen.level(4); screen.move(10,62); screen.text("K2:"..rng); 
   screen.move(64,62); screen.text("K3:"); screen.level(15); screen.move(126,62); screen.text_right(shp)
+  UI.draw_popup(G)
 end
 
 function UI.draw_env_inspector(G, id)
   local side = (id==7) and "L" or "R"
   local val_pre = params:get("preamp"..side) or 1
   local val_slew = params:get("envSlew"..side) or 0.05
-
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(5,10); screen.text(SRC_NAMES[id]); screen.rect(10,20,108,25); screen.stroke(); UI.draw_scope(G,id,10,20,108,25,1); 
-  
   screen.level(4)
   screen.move(2, 55); screen.text("E2:PREAMP"); screen.level(15); screen.text(string.format(" %.1fx", val_pre))
   screen.level(4)
   screen.move(126, 55); screen.text_right(string.format("E3:SLEW %.2f", val_slew))
+  UI.draw_popup(G)
 end
 
 function UI.draw_yellow_inspector(G, id)
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(5,10); screen.text(SRC_NAMES[id]); screen.rect(10,20,108,25); screen.stroke(); UI.draw_scope(G,id,10,20,108,25,1); screen.level(4)
   screen.move(64,55); screen.text_center("ADDRESS NOISE")
+  UI.draw_popup(G)
 end
 function UI.draw_coco_radar(G, x, y, w, id)
   local c=G.coco[id]; if not c then return end; screen.level(1); screen.rect(x,y,w,8); screen.stroke()
@@ -179,25 +195,22 @@ function UI.draw_edit_menu(G, id)
   local fb = params:get("fb"..side)
   local bit_idx = params:get("bits"..side)
   local dlb_idx = params:get("dolby"..side)
-
   local is_link = G.focus.edit_l and G.focus.edit_r
   local title = is_link and "[ < STEREO LINK > ]" or ("COCO "..id) 
-
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(5,10); screen.text(title); screen.move(120,10); screen.text_right("K3: "..(BIT_NAMES[bit_idx]))
   screen.move(10,30); screen.text("E1: FILT "..string.format("%.2f",filt)); screen.move(10,45); screen.text("E2: SPD "..string.format("%.2f",speed))
   screen.move(10,60); screen.text("E3: FB "..math.floor(fb*100).."%")
   screen.move(120,60); screen.text_right("K2: "..(DLB_NAMES[dlb_idx]))
+  UI.draw_popup(G)
 end
 function UI.draw_patch_menu(G)
   local src,dst=G.focus.source,G.focus.last_dest; if not src or not dst then return end
   local val=G.patch[src][dst] or 0; screen.level(0); screen.rect(10,10,108,44); screen.fill(); screen.level(15); screen.rect(10,10,108,44); screen.stroke()
   screen.move(64,25); screen.text_center("PATCHING..."); screen.move(64,35); screen.text_center(SRC_NAMES[src].." > "..DST_NAMES[dst])
   screen.move(64,40); screen.level(2); screen.line_rel(40,0); screen.move(64,40); screen.line_rel(-40,0); screen.stroke(); screen.level(15); screen.move(64,40); screen.line_rel(val*40,0); screen.stroke(); screen.circle(64+(val*40),40,2); screen.fill()
-  
-  -- LAYOUT FIX: Remove label, show only value
   screen.level(15); screen.move(115, 20); screen.text_right(string.format("%.0f%%",val*100))
-  
   UI.draw_scope(G,src,30,45,68,10,math.abs(val))
+  UI.draw_popup(G)
 end
 return UI
