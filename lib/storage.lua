@@ -1,6 +1,8 @@
--- lib/storage.lua v2003
--- CHANGELOG v2003:
--- 1. PERSISTENCE: Added 'sequencers' table to Save/Load routine.
+-- lib/storage.lua v2010
+-- CHANGELOG v2010:
+-- 1. CRASH PREVENTION: Safe loading of Matrix. 
+--    If loaded file has fewer columns (e.g. 20), it defaults to 0.0 for new cols (21,22).
+--    This prevents 'nil' errors in the UI/Grid loops.
 
 local Storage = {}
 
@@ -30,7 +32,7 @@ function Storage.save(G, pset_number)
     tape_path_l = path1,
     tape_path_r = path2,
     tape_len = len,
-    sequencers = G.sequencers -- NEW: Save ghost hands
+    sequencers = G.sequencers 
   }
   
   tab.save(data, Storage.get_filename(pset_number))
@@ -44,22 +46,33 @@ function Storage.load(G, SC, pset_number)
     local data = tab.load(file)
     if data then
       if data.patch then
-        G.patch = data.patch
+        -- SAFE LOAD MATRIX
         for src=1, 10 do
-          for dst=1, 20 do if G.patch[src][dst] ~= 0 then SC.update_matrix(dst, G) end end
+          if data.patch[src] then -- Check source exists
+             for dst=1, 22 do -- FORCE 22 LOOP
+                -- Use loaded value OR 0.0 if nil (Critical fix)
+                local val = data.patch[src][dst] or 0.0 
+                G.patch[src][dst] = val
+                if val ~= 0 then SC.update_matrix(dst, G) end
+             end
+          end
         end
       end
-      if data.dest_gains then G.dest_gains = data.dest_gains; SC.update_dest_gains(G) end
+      
+      -- Safe Gains Load
+      if data.dest_gains then 
+         for i=1, 22 do 
+            G.dest_gains[i] = data.dest_gains[i] or 1.0 
+         end
+         SC.update_dest_gains(G) 
+      end
+      
       if data.tape_len then params:set("tape_len", data.tape_len) end
       
-      -- NEW: Restore Sequencers
       if data.sequencers then
          G.sequencers = data.sequencers
-         -- Reset non-serializable runtime properties
          for i=1,4 do 
             G.sequencers[i].double_click_timer = nil 
-            -- If loaded state was active, keep it active? Or default to STOP?
-            -- Let's default to STOP (3) to avoid chaos on load
             if G.sequencers[i].state == 2 or G.sequencers[i].state == 4 then
                G.sequencers[i].state = 3
             end
