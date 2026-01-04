@@ -1,8 +1,6 @@
-// Engine_Ncoco.sc v2002
-// CHANGELOG v2002:
-// 1. SMART READ: 'read_tape' now truncates files > 60s to fit the buffer.
-//    Logic: Buffer.read(..., numFrames: 2880000).
-// 2. ARCHITECTURE: Avant-style temp buffer + copyData maintained.
+// Engine_Ncoco.sc v2012
+// CHANGELOG v2012:
+// 1. SAFETY: Added Limiter.ar(0.95) to master output to prevent digital clipping.
 
 Engine_Ncoco : CroneEngine {
 	var <synth;
@@ -15,7 +13,6 @@ Engine_Ncoco : CroneEngine {
 	}
 
 	alloc {
-		// FIXED 60s BUFFER (The "Canvas")
 		bufL = Buffer.alloc(context.server, 48000 * 60, 1);
 		bufR = Buffer.alloc(context.server, 48000 * 60, 1);
 		norns_addr = NetAddr("127.0.0.1", 10111);
@@ -52,6 +49,7 @@ Engine_Ncoco : CroneEngine {
 			var mod_filtL_Amts, mod_filtR_Amts;
 			var mod_recL_Amts, mod_recR_Amts;
 			var mod_p1_Amts, mod_p2_Amts, mod_p3_Amts, mod_p4_Amts, mod_p5_Amts, mod_p6_Amts;
+            var mod_volL_Amts, mod_volR_Amts; 
 
 			var inputL_sig, inputR_sig, envL, envR;
 			var p1, p2, p3, p4, p5, p6;
@@ -65,6 +63,7 @@ Engine_Ncoco : CroneEngine {
 			var mod_val_skipL, mod_val_skipR, mod_val_ampL, mod_val_ampR;
 			var mod_val_fbL, mod_val_fbR, mod_val_filtL, mod_val_filtR;
 			var mod_val_recL, mod_val_recR;
+			var mod_val_volL, mod_val_volR;
 			var mod_p1, mod_p2, mod_p3, mod_p4, mod_p5, mod_p6;
 			
 			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR;
@@ -91,12 +90,14 @@ Engine_Ncoco : CroneEngine {
 			var recLogicL, recLogicR;
 			var feedbackL, feedbackR;
 			var osc_trigger; 
+            var finalVolL, finalVolR;
+            var master_out; // NEW
 
 			var feedback_in, fb_petals, fb_yellow;
 
 			// --- DSP ---
 
-			dest_gains = NamedControl.kr(\dest_gains, 1!20);
+			dest_gains = NamedControl.kr(\dest_gains, 1!22); 
 			
 			mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!10);
 			mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!10);
@@ -112,6 +113,8 @@ Engine_Ncoco : CroneEngine {
 			mod_filtR_Amts=NamedControl.kr(\mod_filtR_Amts, 0!10);
 			mod_recL_Amts=NamedControl.kr(\mod_recL_Amts, 0!10);
 			mod_recR_Amts=NamedControl.kr(\mod_recR_Amts, 0!10);
+            mod_volL_Amts=NamedControl.kr(\mod_volL_Amts, 0!10); 
+            mod_volR_Amts=NamedControl.kr(\mod_volR_Amts, 0!10); 
 			mod_p1_Amts=NamedControl.kr(\mod_p1_Amts, 0!10);
 			mod_p2_Amts=NamedControl.kr(\mod_p2_Amts, 0!10);
 			mod_p3_Amts=NamedControl.kr(\mod_p3_Amts, 0!10);
@@ -193,6 +196,9 @@ Engine_Ncoco : CroneEngine {
 			mod_val_fbR=((sources_sig*mod_fbR_Amts).sum * dest_gains[9]).tanh.lag(slew_amp);
 			mod_val_filtL=((sources_sig*mod_filtL_Amts).sum * dest_gains[3]).tanh.lag(slew_misc);
 			mod_val_filtR=((sources_sig*mod_filtR_Amts).sum * dest_gains[10]).tanh.lag(slew_misc);
+            
+            mod_val_volL=((sources_sig*mod_volL_Amts).sum * dest_gains[20]).tanh.lag(slew_amp);
+            mod_val_volR=((sources_sig*mod_volR_Amts).sum * dest_gains[21]).tanh.lag(slew_amp);
 			
 			// USE RAW SUM FOR FLIP LOGIC
 			mod_val_flipL = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
@@ -299,8 +305,13 @@ Engine_Ncoco : CroneEngine {
 				HPF.ar(LPF.ar(readR, (totalFiltR.min(0)+1).linexp(0,1,100,20000)), totalFiltR.max(0).linexp(0,1,20,15000)),
 				readR
 			]);
+            
+            finalVolL = (ampL + mod_val_volL).clip(0, 2);
+            finalVolR = (ampR + mod_val_volR).clip(0, 2);
 
-			Out.ar(out, Balance2.ar((readL + bleedL)*ampL, (readL + bleedL)*ampL, panL) + Balance2.ar((readR + bleedR)*ampR, (readR + bleedR)*ampR, panR));
+            // FINAL OUTPUT with LIMITER
+			master_out = Balance2.ar((readL + bleedL)*finalVolL, (readL + bleedL)*finalVolL, panL) + Balance2.ar((readR + bleedR)*finalVolR, (readR + bleedR)*finalVolR, panR);
+            Out.ar(out, Limiter.ar(master_out, 0.95)); // Safety First
 			
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [ptrL/endL, ptrR/endR, gateRecL, gateRecR, flipStateL, flipStateR, (skipL + mod_val_skipL).clip(0,1), (skipR + mod_val_skipR).clip(0,1), out1, out2, out3, out4, out5, out6, envL, envR, yellowL, yellowR, finalRateL, finalRateR, Amplitude.kr(readL*ampL), Amplitude.kr(readR*ampR)]);
@@ -312,26 +323,22 @@ Engine_Ncoco : CroneEngine {
 
 		// COMMANDS
 		this.addCommand("clear_tape", "i", { |msg| var b=if(msg[1]==0,{bufL},{bufR}); b.zero; });
-		this.addCommand("dest_gains", "ffffffffffffffffffff", { |msg| synth.setn(\dest_gains, msg.drop(1)) });
+		this.addCommand("dest_gains", "ffffffffffffffffffffff", { |msg| synth.setn(\dest_gains, msg.drop(1)) });
 		
-		// AVANT STYLE WRITE: Only writes active loop length
 		this.addCommand("write_tape", "isf", { |msg| 
-			var b=if(msg[1]==1,{bufL},{bufR}); // 1=L, 2=R
+			var b=if(msg[1]==1,{bufL},{bufR}); 
 			var len_frames = (msg[3] * 48000).asInteger;
 			b.write(msg[2], "wav", "int16", numFrames: len_frames); 
 		});
 		
-		// AVANT STYLE READ (TRUNCATED): Read max 60s
 		this.addCommand("read_tape", "is", { |msg| 
-			var target_buf = if(msg[1]==1,{bufL},{bufR}); // 1=L, 2=R
+			var target_buf = if(msg[1]==1,{bufL},{bufR}); 
 			var path = msg[2];
-			var maxFrames = target_buf.numFrames; // 60s
+			var maxFrames = target_buf.numFrames; 
 			
 			if(File.exists(path)) {
-				// LIMIT READ TO MAXFRAMES to prevent buffer resize/overflow
 				Buffer.read(context.server, path, 0, maxFrames, action: { |temp|
 					temp.copyData(target_buf, 0, 0, temp.numFrames);
-					// Inform Lua about actual duration
 					norns_addr.sendMsg("/buffer_info", msg[1], temp.numFrames / 48000.0);
 					temp.free;
 				});
@@ -399,6 +406,8 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("mod_filtR", "ffffffffff", { |msg| synth.setn(\mod_filtR_Amts, msg.drop(1)) });
 		this.addCommand("mod_recL", "ffffffffff", { |msg| synth.setn(\mod_recL_Amts, msg.drop(1)) });
 		this.addCommand("mod_recR", "ffffffffff", { |msg| synth.setn(\mod_recR_Amts, msg.drop(1)) });
+        this.addCommand("mod_volL", "ffffffffff", { |msg| synth.setn(\mod_volL_Amts, msg.drop(1)) });
+        this.addCommand("mod_volR", "ffffffffff", { |msg| synth.setn(\mod_volR_Amts, msg.drop(1)) });
 		this.addCommand("mod_p1", "ffffffffff", { |msg| synth.setn(\mod_p1_Amts, msg.drop(1)) });
 		this.addCommand("mod_p2", "ffffffffff", { |msg| synth.setn(\mod_p2_Amts, msg.drop(1)) });
 		this.addCommand("mod_p3", "ffffffffff", { |msg| synth.setn(\mod_p3_Amts, msg.drop(1)) });
