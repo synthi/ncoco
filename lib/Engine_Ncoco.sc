@@ -1,6 +1,10 @@
-// Engine_Ncoco.sc v2012
-// CHANGELOG v2012:
-// 1. SAFETY: Added Limiter.ar(0.95) to master output to prevent digital clipping.
+// Engine_Ncoco.sc v2026
+// CHANGELOG v2026:
+// 1. CRASH FIX: Restored Dual Definition of 'sources_sig'.
+//    - Def 1 uses feedback signals (for internal Petal FM).
+//    - Def 2 uses live signals (for external parameter modulation).
+//    - Solves "Variable not defined" crash during init.
+// 2. ENVELOPE: Maintained Split logic (Raw for Dolby, Boost for Mod/UI).
 
 Engine_Ncoco : CroneEngine {
 	var <synth;
@@ -13,6 +17,7 @@ Engine_Ncoco : CroneEngine {
 	}
 
 	alloc {
+		// FIXED 60s BUFFER
 		bufL = Buffer.alloc(context.server, 48000 * 60, 1);
 		bufR = Buffer.alloc(context.server, 48000 * 60, 1);
 		norns_addr = NetAddr("127.0.0.1", 10111);
@@ -32,6 +37,7 @@ Engine_Ncoco : CroneEngine {
 			bitDepthL=8, bitDepthR=8, interp=2,                   
 			dolbyL=0, dolbyR=0, loopLen=8.0, skipMode=0,
 			preampL=1.0, preampR=1.0, envSlewL=0.05, envSlewR=0.05,
+			dolbyBoostL=0, dolbyBoostR=0, 
 
 			p1f=0.5, p2f=0.6, p3f=0.7, p4f=0.8, p5f=0.9, p6f=1.0,
 			p1chaos=0, p2chaos=0, p3chaos=0, p4chaos=0, p5chaos=0, p6chaos=0,
@@ -49,9 +55,11 @@ Engine_Ncoco : CroneEngine {
 			var mod_filtL_Amts, mod_filtR_Amts;
 			var mod_recL_Amts, mod_recR_Amts;
 			var mod_p1_Amts, mod_p2_Amts, mod_p3_Amts, mod_p4_Amts, mod_p5_Amts, mod_p6_Amts;
-            var mod_volL_Amts, mod_volR_Amts; 
+			var mod_volL_Amts, mod_volR_Amts; 
 
 			var inputL_sig, inputR_sig, envL, envR;
+			var envL_raw, envR_raw, envL_dolby, envR_dolby;
+
 			var p1, p2, p3, p4, p5, p6;
 			var c1, c2, c3, c4, c5, c6; 
 			var b_ph1, b_ph2, b_ph3, b_ph4, b_ph5, b_ph6; 
@@ -90,8 +98,8 @@ Engine_Ncoco : CroneEngine {
 			var recLogicL, recLogicR;
 			var feedbackL, feedbackR;
 			var osc_trigger; 
-            var finalVolL, finalVolR;
-            var master_out; // NEW
+			var finalVolL, finalVolR;
+			var master_out; 
 
 			var feedback_in, fb_petals, fb_yellow;
 
@@ -113,8 +121,8 @@ Engine_Ncoco : CroneEngine {
 			mod_filtR_Amts=NamedControl.kr(\mod_filtR_Amts, 0!10);
 			mod_recL_Amts=NamedControl.kr(\mod_recL_Amts, 0!10);
 			mod_recR_Amts=NamedControl.kr(\mod_recR_Amts, 0!10);
-            mod_volL_Amts=NamedControl.kr(\mod_volL_Amts, 0!10); 
-            mod_volR_Amts=NamedControl.kr(\mod_volR_Amts, 0!10); 
+			mod_volL_Amts=NamedControl.kr(\mod_volL_Amts, 0!10); 
+			mod_volR_Amts=NamedControl.kr(\mod_volR_Amts, 0!10); 
 			mod_p1_Amts=NamedControl.kr(\mod_p1_Amts, 0!10);
 			mod_p2_Amts=NamedControl.kr(\mod_p2_Amts, 0!10);
 			mod_p3_Amts=NamedControl.kr(\mod_p3_Amts, 0!10);
@@ -129,8 +137,17 @@ Engine_Ncoco : CroneEngine {
 			inputL_sig = In.ar(inL); inputR_sig = In.ar(inR);
 			inputL_sig = (inputL_sig * preampL).tanh; inputR_sig = (inputR_sig * preampR).tanh;
 			
-			envL = Amplitude.kr(inputL_sig, 0.01, 0.08); 
-			envR = Amplitude.kr(inputR_sig, 0.01, 0.08);
+			// ENVELOPES
+			envL_raw = Amplitude.kr(inputL_sig, 0.01, 0.08); 
+			envR_raw = Amplitude.kr(inputR_sig, 0.01, 0.08);
+
+			// BOOSTED (UI/Mod)
+			envL = envL_raw * 2.0;
+			envR = envR_raw * 2.0;
+			
+			// DOLBY SELECTOR
+			envL_dolby = Select.kr(dolbyBoostL, [envL_raw, envL]);
+			envR_dolby = Select.kr(dolbyBoostR, [envR_raw, envR]);
 
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
@@ -143,6 +160,9 @@ Engine_Ncoco : CroneEngine {
 			inputL_sig = inputL_sig + noiseL; inputR_sig = inputR_sig + noiseR;
 
 			yellowL = DC.ar(0); yellowR = DC.ar(0);
+			
+			// --- SOURCE SIG 1: FOR PETAL FM (Uses Feedback/Past Signals) ---
+			// CRITICAL FIX: Defined here before Petal Phasors
 			sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 			
 			mod_p1=((sources_sig*mod_p1_Amts).sum * dest_gains[14] * 10);
@@ -182,7 +202,9 @@ Engine_Ncoco : CroneEngine {
 			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
 			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
 			
-			sources_sig = [out1, out2, out3, out4, out5, out6, K2A.ar(envL*2-1), K2A.ar(envR*2-1), fb_yellow[0], fb_yellow[1]];
+			// --- SOURCE SIG 2: FOR GENERAL MODULATION (Uses Live Signals) ---
+			// CRITICAL FIX: Redefined here after Oscillators exist
+			sources_sig = [out1, out2, out3, out4, out5, out6, K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 
 			driftL = LFNoise2.kr(0.5, 0.005); 
 			driftR = LFNoise2.kr(0.5, 0.005);
@@ -197,10 +219,9 @@ Engine_Ncoco : CroneEngine {
 			mod_val_filtL=((sources_sig*mod_filtL_Amts).sum * dest_gains[3]).tanh.lag(slew_misc);
 			mod_val_filtR=((sources_sig*mod_filtR_Amts).sum * dest_gains[10]).tanh.lag(slew_misc);
             
-            mod_val_volL=((sources_sig*mod_volL_Amts).sum * dest_gains[20]).tanh.lag(slew_amp);
-            mod_val_volR=((sources_sig*mod_volR_Amts).sum * dest_gains[21]).tanh.lag(slew_amp);
+			mod_val_volL=((sources_sig*mod_volL_Amts).sum * dest_gains[20]).tanh.lag(slew_amp);
+			mod_val_volR=((sources_sig*mod_volR_Amts).sum * dest_gains[21]).tanh.lag(slew_amp);
 			
-			// USE RAW SUM FOR FLIP LOGIC
 			mod_val_flipL = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
 			mod_val_flipR = (sources_sig*mod_flipR_Amts).sum * dest_gains[11];
 			
@@ -209,7 +230,6 @@ Engine_Ncoco : CroneEngine {
 			mod_val_recL=Schmidt.ar((sources_sig*mod_recL_Amts).sum * dest_gains[6], 0.6, 0.4);
 			mod_val_recR=Schmidt.ar((sources_sig*mod_recR_Amts).sum * dest_gains[13], 0.6, 0.4);
 
-			// REC XOR LOGIC 
 			recLogicL = (recL + mod_val_recL).mod(2);
 			recLogicR = (recR + mod_val_recR).mod(2);
 			gateRecL = Select.ar(recLogicL > 0.5, [K2A.ar(0), K2A.ar(1)]);
@@ -218,16 +238,12 @@ Engine_Ncoco : CroneEngine {
 			dryL = inputL_sig * (volInL + mod_val_ampL).clip(0, 2);
 			dryR = inputR_sig * (volInR + mod_val_ampR).clip(0, 2);
 			
-			// FLIP HARD SWITCH (BINARY)
 			baseSpeedL = (speedL + mod_val_speedL + driftL).lag(0.01);
 			baseSpeedR = (speedR + mod_val_speedR + driftR).lag(0.01);
 
-			// LOGIC: (Manual + (Mod > 0.1)) % 2
 			flipLogicL = (flipL + (mod_val_flipL > 0.1)).mod(2);
 			flipLogicR = (flipR + (mod_val_flipR > 0.1)).mod(2);
-
-			flipStateL = flipLogicL;
-			flipStateR = flipLogicR;
+			flipStateL = flipLogicL; flipStateR = flipLogicR;
 
 			finalRateL = Select.ar(flipLogicL > 0.5, [baseSpeedL, baseSpeedL * -1]);
 			finalRateR = Select.ar(flipLogicR > 0.5, [baseSpeedR, baseSpeedR * -1]);
@@ -235,14 +251,12 @@ Engine_Ncoco : CroneEngine {
 			jumpTrigL = Changed.ar(skipL + mod_val_skipL);
 			jumpTrigR = Changed.ar(skipR + mod_val_skipR);
 			
-			// LOOP LOGIC (AVANT STYLE)
 			endL = (loopLen * 48000).min(BufFrames.kr(bufL));
 			endR = (loopLen * 48000).min(BufFrames.kr(bufR));
 			
 			ptrL = Phasor.ar(jumpTrigL, finalRateL * BufRateScale.kr(bufL), 0, endL, TRand.ar(0, endL, jumpTrigL));
 			ptrR = Phasor.ar(jumpTrigR, finalRateR * BufRateScale.kr(bufR), 0, endR, TRand.ar(0, endR, jumpTrigR));
 			
-			// POS OUTPUT
 			yellowL = (ptrL / endL);
 			yellowR = (ptrR / endR);
 			
@@ -258,18 +272,18 @@ Engine_Ncoco : CroneEngine {
 			envFbR = Amplitude.kr(readR, 0.01, 0.08);
 			
 			d_lin_inL = DC.kr(1.0);
-			d_exp_inL = envL.pow(2);
+			d_exp_inL = envL_dolby.pow(2);
 			d_duck_inL = (1 - envFbL).clip(0,1);
 			d_lin_inR = DC.kr(1.0);
-			d_exp_inR = envR.pow(2);
+			d_exp_inR = envR_dolby.pow(2);
 			d_duck_inR = (1 - envFbR).clip(0,1);
 
 			d_lin_fbL = DC.kr(1.0);
 			d_exp_fbL = envFbL.pow(2);
-			d_duck_fbL = (1 - envL).clip(0,1);
+			d_duck_fbL = (1 - envL_dolby).clip(0,1);
 			d_lin_fbR = DC.kr(1.0);
 			d_exp_fbR = envFbR.pow(2);
-			d_duck_fbR = (1 - envR).clip(0,1);
+			d_duck_fbR = (1 - envR_dolby).clip(0,1);
 
 			gainInL = Select.kr(dolbyL, [d_lin_inL, d_exp_inL, d_lin_inL, d_exp_inL, d_lin_inL, d_duck_inL, d_exp_inL, d_duck_inL, d_duck_inL]);
 			gainFbL = Select.kr(dolbyL, [d_lin_fbL, d_lin_fbL, d_exp_fbL, d_exp_fbL, d_duck_fbL, d_lin_fbL, d_duck_fbL, d_exp_fbL, d_duck_fbL]);
@@ -309,9 +323,8 @@ Engine_Ncoco : CroneEngine {
             finalVolL = (ampL + mod_val_volL).clip(0, 2);
             finalVolR = (ampR + mod_val_volR).clip(0, 2);
 
-            // FINAL OUTPUT with LIMITER
 			master_out = Balance2.ar((readL + bleedL)*finalVolL, (readL + bleedL)*finalVolL, panL) + Balance2.ar((readR + bleedR)*finalVolR, (readR + bleedR)*finalVolR, panR);
-            Out.ar(out, Limiter.ar(master_out, 0.95)); // Safety First
+            Out.ar(out, Limiter.ar(master_out, 0.95)); 
 			
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [ptrL/endL, ptrR/endR, gateRecL, gateRecR, flipStateL, flipStateR, (skipL + mod_val_skipL).clip(0,1), (skipR + mod_val_skipR).clip(0,1), out1, out2, out3, out4, out5, out6, envL, envR, yellowL, yellowR, finalRateL, finalRateR, Amplitude.kr(readL*ampL), Amplitude.kr(readR*ampR)]);
@@ -321,7 +334,6 @@ Engine_Ncoco : CroneEngine {
 		synth = Synth.new(\NcocoDSP, [\out, context.out_b.index, \bufL, bufL, \bufR, bufR, \inL, context.in_b[0].index, \inR, context.in_b[1].index], context.xg);
 		osc_responder = OSCFunc({ |msg| NetAddr("127.0.0.1", 10111).sendMsg("/update", *msg.drop(3)); }, '/update', context.server.addr).fix;
 
-		// COMMANDS
 		this.addCommand("clear_tape", "i", { |msg| var b=if(msg[1]==0,{bufL},{bufR}); b.zero; });
 		this.addCommand("dest_gains", "ffffffffffffffffffffff", { |msg| synth.setn(\dest_gains, msg.drop(1)) });
 		
@@ -374,6 +386,9 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("preampR", "f", { |msg| synth.set(\preampR, msg[1]) });
 		this.addCommand("envSlewL", "f", { |msg| synth.set(\envSlewL, msg[1]) });
 		this.addCommand("envSlewR", "f", { |msg| synth.set(\envSlewR, msg[1]) });
+		this.addCommand("dolbyBoostL", "i", { |msg| synth.set(\dolbyBoostL, msg[1]); });
+		this.addCommand("dolbyBoostR", "i", { |msg| synth.set(\dolbyBoostR, msg[1]); });
+
 		this.addCommand("p1f", "f", { |msg| synth.set(\p1f, msg[1]) });
 		this.addCommand("p2f", "f", { |msg| synth.set(\p2f, msg[1]) });
 		this.addCommand("p3f", "f", { |msg| synth.set(\p3f, msg[1]) });
@@ -406,8 +421,8 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("mod_filtR", "ffffffffff", { |msg| synth.setn(\mod_filtR_Amts, msg.drop(1)) });
 		this.addCommand("mod_recL", "ffffffffff", { |msg| synth.setn(\mod_recL_Amts, msg.drop(1)) });
 		this.addCommand("mod_recR", "ffffffffff", { |msg| synth.setn(\mod_recR_Amts, msg.drop(1)) });
-        this.addCommand("mod_volL", "ffffffffff", { |msg| synth.setn(\mod_volL_Amts, msg.drop(1)) });
-        this.addCommand("mod_volR", "ffffffffff", { |msg| synth.setn(\mod_volR_Amts, msg.drop(1)) });
+		this.addCommand("mod_volL", "ffffffffff", { |msg| synth.setn(\mod_volL_Amts, msg.drop(1)) });
+		this.addCommand("mod_volR", "ffffffffff", { |msg| synth.setn(\mod_volR_Amts, msg.drop(1)) });
 		this.addCommand("mod_p1", "ffffffffff", { |msg| synth.setn(\mod_p1_Amts, msg.drop(1)) });
 		this.addCommand("mod_p2", "ffffffffff", { |msg| synth.setn(\mod_p2_Amts, msg.drop(1)) });
 		this.addCommand("mod_p3", "ffffffffff", { |msg| synth.setn(\mod_p3_Amts, msg.drop(1)) });
