@@ -1,12 +1,14 @@
--- ncoco.lua v2005
+-- ncoco.lua v2024
 -- name: Ncoco
 -- desc: Hexaquantus Lo-Fi Delay & Chaos Computer.
 --       A Ciat-Lonbarde inspired instrument.
 -- tags: delay, lo-fi, chaos, feedback
 --
--- v2005 CHANGELOG:
--- 1. SEQUENCER ENGINE: Replaced 'Sleep' logic with 'Absolute Time Scheduler'.
---    Fixes timing freeze during Overdub/Insert. High-res scanning (100Hz).
+-- v2024 CHANGELOG:
+-- 1. CALIBRATION: Expanded MIDI range to 1-126.
+-- 2. FEEDBACK: Split point moved to 40% (0.4) for guaranteed integer resolution.
+-- 3. PREAMP: Split at 50% Physical (Logical 0.5). Lower half = 1.0-3.0 range.
+-- 4. VOLUME: Added Glue at 0dB point (Logical 0.75).
 
 engine.name = 'Ncoco'
 
@@ -20,23 +22,105 @@ local status, Params = pcall(include, 'ncoco/lib/param_set')
 local status, Storage = pcall(include, 'ncoco/lib/storage') 
 
 local g = grid.connect()
-local m = midi.connect()
-local grid_metro, screen_metro
 
 if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
 end
 
--- --- ABSOLUTE TIME SEQUENCER ENGINE ---
+-- --- HELPERS FOR 16n ---
+
+local function normalize_input(midi_val)
+   -- Expanded Range 1-126
+   if midi_val < 1 then return 0.0 end
+   if midi_val > 126 then return 1.0 end
+   -- AUDIO TAPER CALIBRATION (Physical Center = MIDI 80 = Logical 0.5)
+   if midi_val <= 80 then return util.linlin(1, 80, 0.0, 0.5, midi_val)
+   else return util.linlin(80, 126, 0.5, 1.0, midi_val) end
+end
+
+local function apply_glue(val_norm, param_id)
+   -- CENTER GLUE for Bipolar controls
+   if param_id == "speed_offsetL" or param_id == "speed_offsetR" or 
+      param_id == "filtL" or param_id == "filtR" or 
+      param_id == "pan_l" or param_id == "pan_r" then
+      
+      local center = 0.5
+      local width = 0.02
+      if math.abs(val_norm - center) < width then return center end
+      if val_norm < (center - width) then return util.linlin(0, center-width, 0, center, val_norm)
+      else return util.linlin(center+width, 1, center, 1, val_norm) end
+   end
+   
+   -- VOLUME GLUE at 0dB (Logical 0.75)
+   if param_id == "vol_l" or param_id == "vol_r" then
+      local center = 0.75
+      local width = 0.02
+      if math.abs(val_norm - center) < width then return center end
+      if val_norm < (center - width) then return util.linlin(0, center-width, 0, center, val_norm)
+      else return util.linlin(center+width, 1, center, 1, val_norm) end
+   end
+
+   return val_norm
+end
+
+local function apply_curve(val_norm, param_id)
+   -- FEEDBACK: 40% SPLIT (v2024)
+   -- Ensures >1.5 steps per integer in high range
+   if param_id == "fbL" or param_id == "fbR" then
+      if val_norm < 0.40 then
+         -- Fast Rise: 0.0 to 0.70 in the first 40%
+         return util.linlin(0, 0.40, 0.0, 0.70, val_norm)
+      else
+         -- High Precision: 0.70 to 1.20 in the remaining 60%
+         return util.linlin(0.40, 1.0, 0.70, 1.20, val_norm)
+      end
+   end
+   
+   -- VOLUME: 75% SPLIT (0dB at 75%)
+   if param_id == "vol_l" or param_id == "vol_r" then
+      if val_norm < 0.75 then
+         return util.linlin(0, 0.75, 0.0, 1.0, val_norm)
+      else
+         return util.linlin(0.75, 1.0, 1.0, 2.0, val_norm)
+      end
+   end
+   
+   -- PREAMP: 50% PHYSICAL SPLIT (v2024)
+   -- Logical 0.5 (Physical Center) = Value 3.0
+   if param_id == "preampL" or param_id == "preampR" then
+      if val_norm < 0.5 then
+          -- Bottom Half: 1.0 to 3.0
+          return util.linlin(0, 0.5, 1.0, 3.0, val_norm)
+      else
+          -- Top Half: 3.0 to 20.0
+          return util.linlin(0.5, 1.0, 3.0, 20.0, val_norm)
+      end
+   end
+   
+   -- FILTERS: LINEAR BIPOLAR (-1 to 1)
+   if param_id == "filtL" or param_id == "filtR" then
+      return util.linlin(0, 1, -1.0, 1.0, val_norm)
+   end
+   
+   -- SPEED OFFSET: LINEAR BIPOLAR (+/- 0.25)
+   if param_id == "speed_offsetL" or param_id == "speed_offsetR" then
+      return util.linlin(0, 1, -0.25, 0.25, val_norm)
+   end
+   
+   local p = params:lookup_param(param_id)
+   if p then return p.controlspec:map(val_norm) end
+   return val_norm
+end
+-- -----------------------
+
+-- SEQUENCER ENGINE
 local function run_sequencer(id, grid_device)
   local s = G.sequencers[id]
   s.playhead = 0
   s.last_cpu_time = util.time()
   
-  -- Helper to trigger events in a time window
   local function trigger_window(t_start, t_end)
      for _, event in ipairs(s.data) do
-        -- Check if event falls in this window [start, end)
         if event.dt >= t_start and event.dt < t_end then
            GridNav.key(G, grid_device, event.x, event.y, event.z, true)
         end
@@ -44,42 +128,44 @@ local function run_sequencer(id, grid_device)
   end
 
   while true do
-    -- Only run if Playing (2) or Dubbing (4) and has duration
     if (s.state == 2 or s.state == 4) and s.duration > 0.01 then
        local now = util.time()
        local delta = now - s.last_cpu_time
        s.last_cpu_time = now
        
-       -- Advance playhead
        local old_head = s.playhead
        s.playhead = s.playhead + delta
        
        if s.playhead >= s.duration then
-          -- WRAP AROUND (LOOP)
-          -- 1. Trigger events from old_head to End
-          trigger_window(old_head, s.duration + 0.001) -- +margin
-          
-          -- 2. Wrap
+          trigger_window(old_head, s.duration + 0.001) 
           s.playhead = s.playhead % s.duration
-          
-          -- 3. Trigger events from Start to new playhead
           trigger_window(0, s.playhead)
-          
-          -- Sync start_time for DUB logic alignment
           s.start_time = now - s.playhead
        else
-          -- NORMAL ADVANCE
           trigger_window(old_head, s.playhead)
        end
        
-       clock.sleep(0.01) -- High res tick (10ms)
+       clock.sleep(0.01) 
     else
-       -- If Stopped or Empty, just update timestamp to avoid jumps on start
        s.last_cpu_time = util.time()
        s.playhead = 0
-       clock.sleep(0.1) -- Idle sleep
+       clock.sleep(0.1) 
     end
   end
+end
+
+-- 16n MAP
+local fader_map_def = {
+  [7]="speed_offsetL", [8]="speed_offsetR",
+  [9]="preampL", [10]="preampR",
+  [11]="fbL", [12]="fbR",
+  [13]="vol_l", [14]="vol_r",
+  [15]="filtL", [16]="filtR"
+}
+
+local function get_petal_param(id)
+   local r = params:get("p"..id.."range")
+   return (r==1) and "p"..id.."f_lfo" or "p"..id.."f_aud"
 end
 
 function init()
@@ -127,10 +213,9 @@ function init()
       SC.set_petal_freq(i, seed_lfo)
     end
     
-    -- START SEQUENCERS (Pass 'g' object)
     for i=1, 4 do clock.run(function() run_sequencer(i, g) end) end
 
-    grid_metro = metro.init(); grid_metro.time = 1/20
+    grid_metro = metro.init(); grid_metro.time = 1/15
     grid_metro.event = function() pcall(GridNav.redraw, G, g) end
     grid_metro:start()
 
@@ -138,18 +223,77 @@ function init()
     screen_metro.event = function() redraw() end
     screen_metro:start()
     
-    G.loaded = true 
-    print("Ncoco v2005 Ready.")
-  end)
+    clock.run(function()
+       clock.sleep(2.0)
+       _16n.init(function(msg) 
+          local id = _16n.cc_2_slider_id(msg.cc)
+          if id then
+             local p_name = nil
+             if id <= 6 then p_name = get_petal_param(id)
+             elseif fader_map_def[id] then p_name = fader_map_def[id] end
+             
+             if p_name then
+                local p_obj = params:lookup_param(p_name)
+                if not p_obj then return end
 
-  _16n.init(function(msg) 
-    local id = _16n.cc_2_slider_id(msg.cc)
-    if id and id <= 6 then 
-       local r = params:get("p"..id.."range")
-       local target = (r==1) and "p"..id.."f_lfo" or "p"..id.."f_aud"
-       local min, max = (r==1) and 0.01 or 20, (r==1) and 20 or 2000
-       params:set(target, util.linexp(0, 127, min, max, msg.val)) 
-    end
+                local val_calibrated = normalize_input(msg.val)
+                local val_glued = apply_glue(val_calibrated, p_name)
+                
+                local current_norm = params:get_raw(p_name)
+                local current_val_real = params:get(p_name)
+                local target_val_real = apply_curve(val_glued, p_name)
+                
+                local target_norm_check = p_obj.controlspec:unmap(target_val_real)
+                local diff = math.abs(target_norm_check - current_norm)
+                
+                if not G.fader_latched[id] then
+                   if diff < 0.05 then
+                      G.fader_latched[id] = true
+                   else
+                      G.popup.name = "* " .. p_obj.name
+                      local display_val = string.format("%.2f", target_val_real)
+                      local display_curr = string.format("%.2f", current_val_real)
+                      
+                      if p_name == "fbL" or p_name == "fbR" then
+                         display_val = math.floor(target_val_real * 100) .. "%"
+                         display_curr = math.floor(current_val_real * 100) .. "%"
+                      elseif p_name == "speed_offsetL" or p_name == "speed_offsetR" then
+                          display_val = string.format("%+.3f", target_val_real)
+                          display_curr = string.format("%+.3f", current_val_real)
+                      end
+                      
+                      G.popup.value = display_val .. " -> " .. display_curr
+                      G.popup.active = true; G.popup.deadline = util.time() + 1.5
+                      return
+                   end
+                end
+                
+                if G.fader_latched[id] then
+                   if diff > 0.15 then 
+                      G.fader_latched[id] = false 
+                   else
+                      params:set(p_name, target_val_real)
+                      
+                      G.popup.name = p_obj.name
+                      local display_val = p_obj:string()
+                      if p_name == "fbL" or p_name == "fbR" then
+                         display_val = math.floor(target_val_real * 100) .. "%"
+                      elseif p_name == "speed_offsetL" or p_name == "speed_offsetR" then
+                          display_val = string.format("%+.3f", target_val_real)
+                      end
+                      
+                      G.popup.value = display_val
+                      G.popup.active = true; G.popup.deadline = util.time() + 1.5
+                   end
+                end
+             end
+          end
+       end)
+       print("16n initialized.")
+    end)
+    
+    G.loaded = true 
+    print("Ncoco v2024 Ready.")
   end)
 end
 
