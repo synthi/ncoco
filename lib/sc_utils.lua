@@ -1,6 +1,6 @@
--- lib/sc_utils.lua v1005
--- CHANGELOG v1005:
--- 1. Added update_dest_gains function.
+-- lib/sc_utils.lua v2008
+-- CHANGELOG v2008:
+-- 1. ADDED: mod_volL (21) and mod_volR (22).
 
 local SC = {}
 
@@ -10,7 +10,8 @@ local dest_names = {
   [8]="mod_speedR", [9]="mod_ampR", [10]="mod_fbR", [11]="mod_filtR", 
   [12]="mod_flipR", [13]="mod_skipR", [14]="mod_recR",
   [15]="mod_p1", [16]="mod_p2", [17]="mod_p3", 
-  [18]="mod_p4", [19]="mod_p5", [20]="mod_p6"
+  [18]="mod_p4", [19]="mod_p5", [20]="mod_p6",
+  [21]="mod_volL", [22]="mod_volR"
 }
 
 function SC.update_matrix(dest_id, G)
