@@ -1,2 +1,2 @@
 # ncoco
-A cocoquantus emulation for Norns + grid 
+A cocoquantus inspired instrument for Norns + grid 
