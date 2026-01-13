@@ -1,10 +1,9 @@
-// Engine_Ncoco.sc v2026
-// CHANGELOG v2026:
-// 1. CRASH FIX: Restored Dual Definition of 'sources_sig'.
-//    - Def 1 uses feedback signals (for internal Petal FM).
-//    - Def 2 uses live signals (for external parameter modulation).
-//    - Solves "Variable not defined" crash during init.
-// 2. ENVELOPE: Maintained Split logic (Raw for Dolby, Boost for Mod/UI).
+// Engine_Ncoco.sc v3005
+// CHANGELOG v3005:
+// 1. CRITICAL FIX: Reverted variable structure to "Interleaved" to fix broken modulations.
+//    (NamedControls are now defined immediately before usage blocks).
+// 2. DSP FIX: Simplified Audio Injection math. Removed faulty bipolar conversion
+//    that caused DC offset. Now uses LeakDC directly on the sum.
 
 Engine_Ncoco : CroneEngine {
 	var <synth;
@@ -37,7 +36,8 @@ Engine_Ncoco : CroneEngine {
 			bitDepthL=8, bitDepthR=8, interp=2,                   
 			dolbyL=0, dolbyR=0, loopLen=8.0, skipMode=0,
 			preampL=1.0, preampR=1.0, envSlewL=0.05, envSlewR=0.05,
-			dolbyBoostL=0, dolbyBoostR=0, 
+			dolbyBoostL=0, dolbyBoostR=0,
+			monitorLevel=0,
 
 			p1f=0.5, p2f=0.6, p3f=0.7, p4f=0.8, p5f=0.9, p6f=1.0,
 			p1chaos=0, p2chaos=0, p3chaos=0, p4chaos=0, p5chaos=0, p6chaos=0,
@@ -47,6 +47,8 @@ Engine_Ncoco : CroneEngine {
 
 			// --- VARS ---
 			var dest_gains;
+			
+			// Mod Amts (Declared here, defined in body)
 			var mod_speedL_Amts, mod_speedR_Amts;
 			var mod_flipL_Amts, mod_flipR_Amts;
 			var mod_skipL_Amts, mod_skipR_Amts;
@@ -54,9 +56,11 @@ Engine_Ncoco : CroneEngine {
 			var mod_fbL_Amts, mod_fbR_Amts;
 			var mod_filtL_Amts, mod_filtR_Amts;
 			var mod_recL_Amts, mod_recR_Amts;
-			var mod_p1_Amts, mod_p2_Amts, mod_p3_Amts, mod_p4_Amts, mod_p5_Amts, mod_p6_Amts;
 			var mod_volL_Amts, mod_volR_Amts; 
+			var mod_audioInL_Amts, mod_audioInR_Amts;
+			var mod_p1_Amts, mod_p2_Amts, mod_p3_Amts, mod_p4_Amts, mod_p5_Amts, mod_p6_Amts;
 
+			// Signal Vars
 			var inputL_sig, inputR_sig, envL, envR;
 			var envL_raw, envR_raw, envL_dolby, envR_dolby;
 
@@ -65,13 +69,15 @@ Engine_Ncoco : CroneEngine {
 			var b_ph1, b_ph2, b_ph3, b_ph4, b_ph5, b_ph6; 
 			var t1, t2, t3, t4, t5, t6; 
 			var out1, out2, out3, out4, out5, out6;
-			var fb_mod, sources_sig; 
+			var sources_sig; 
 			
+			// Mod Values
 			var mod_val_speedL, mod_val_speedR, mod_val_flipL, mod_val_flipR;
 			var mod_val_skipL, mod_val_skipR, mod_val_ampL, mod_val_ampR;
 			var mod_val_fbL, mod_val_fbR, mod_val_filtL, mod_val_filtR;
 			var mod_val_recL, mod_val_recR;
 			var mod_val_volL, mod_val_volR;
+			var mod_val_audioInL, mod_val_audioInR;
 			var mod_p1, mod_p2, mod_p3, mod_p4, mod_p5, mod_p6;
 			
 			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR;
@@ -100,55 +106,37 @@ Engine_Ncoco : CroneEngine {
 			var osc_trigger; 
 			var finalVolL, finalVolR;
 			var master_out; 
-
+			var monitorL, monitorR;
+			
+			var preampNoiseL, preampNoiseR;
 			var feedback_in, fb_petals, fb_yellow;
 
-			// --- DSP ---
-
-			dest_gains = NamedControl.kr(\dest_gains, 1!22); 
+			// --- DSP GRAPH START ---
 			
-			mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!10);
-			mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!10);
-			mod_flipL_Amts=NamedControl.kr(\mod_flipL_Amts, 0!10);
-			mod_flipR_Amts=NamedControl.kr(\mod_flipR_Amts, 0!10);
-			mod_skipL_Amts=NamedControl.kr(\mod_skipL_Amts, 0!10);
-			mod_skipR_Amts=NamedControl.kr(\mod_skipR_Amts, 0!10);
-			mod_ampL_Amts=NamedControl.kr(\mod_ampL_Amts, 0!10);
-			mod_ampR_Amts=NamedControl.kr(\mod_ampR_Amts, 0!10);
-			mod_fbL_Amts=NamedControl.kr(\mod_fbL_Amts, 0!10);
-			mod_fbR_Amts=NamedControl.kr(\mod_fbR_Amts, 0!10);
-			mod_filtL_Amts=NamedControl.kr(\mod_filtL_Amts, 0!10);
-			mod_filtR_Amts=NamedControl.kr(\mod_filtR_Amts, 0!10);
-			mod_recL_Amts=NamedControl.kr(\mod_recL_Amts, 0!10);
-			mod_recR_Amts=NamedControl.kr(\mod_recR_Amts, 0!10);
-			mod_volL_Amts=NamedControl.kr(\mod_volL_Amts, 0!10); 
-			mod_volR_Amts=NamedControl.kr(\mod_volR_Amts, 0!10); 
-			mod_p1_Amts=NamedControl.kr(\mod_p1_Amts, 0!10);
-			mod_p2_Amts=NamedControl.kr(\mod_p2_Amts, 0!10);
-			mod_p3_Amts=NamedControl.kr(\mod_p3_Amts, 0!10);
-			mod_p4_Amts=NamedControl.kr(\mod_p4_Amts, 0!10);
-			mod_p5_Amts=NamedControl.kr(\mod_p5_Amts, 0!10);
-			mod_p6_Amts=NamedControl.kr(\mod_p6_Amts, 0!10);
+			dest_gains = NamedControl.kr(\dest_gains, 1!24); 
 
+			// 1. Feedback Input
 			feedback_in = LocalIn.ar(8);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
 
+			// 2. Preamp & Noise
+			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
+			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
+
 			inputL_sig = In.ar(inL); inputR_sig = In.ar(inR);
-			inputL_sig = (inputL_sig * preampL).tanh; inputR_sig = (inputR_sig * preampR).tanh;
+			inputL_sig = ((inputL_sig * preampL) + preampNoiseL).tanh; 
+			inputR_sig = ((inputR_sig * preampR) + preampNoiseR).tanh;
 			
-			// ENVELOPES
+			// 3. Envelopes
 			envL_raw = Amplitude.kr(inputL_sig, 0.01, 0.08); 
 			envR_raw = Amplitude.kr(inputR_sig, 0.01, 0.08);
-
-			// BOOSTED (UI/Mod)
 			envL = envL_raw * 2.0;
 			envR = envR_raw * 2.0;
-			
-			// DOLBY SELECTOR
 			envL_dolby = Select.kr(dolbyBoostL, [envL_raw, envL]);
 			envR_dolby = Select.kr(dolbyBoostR, [envR_raw, envR]);
 
+			// 4. Sample Rate & Noise Gen
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.00025));
@@ -161,10 +149,16 @@ Engine_Ncoco : CroneEngine {
 
 			yellowL = DC.ar(0); yellowR = DC.ar(0);
 			
-			// --- SOURCE SIG 1: FOR PETAL FM (Uses Feedback/Past Signals) ---
-			// CRITICAL FIX: Defined here before Petal Phasors
+			// 5. INTERNAL MODULATION (Petals FM)
 			sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 			
+			mod_p1_Amts=NamedControl.kr(\mod_p1_Amts, 0!10);
+			mod_p2_Amts=NamedControl.kr(\mod_p2_Amts, 0!10);
+			mod_p3_Amts=NamedControl.kr(\mod_p3_Amts, 0!10);
+			mod_p4_Amts=NamedControl.kr(\mod_p4_Amts, 0!10);
+			mod_p5_Amts=NamedControl.kr(\mod_p5_Amts, 0!10);
+			mod_p6_Amts=NamedControl.kr(\mod_p6_Amts, 0!10);
+
 			mod_p1=((sources_sig*mod_p1_Amts).sum * dest_gains[14] * 10);
 			mod_p2=((sources_sig*mod_p2_Amts).sum * dest_gains[15] * 10);
 			mod_p3=((sources_sig*mod_p3_Amts).sum * dest_gains[16] * 10);
@@ -172,6 +166,7 @@ Engine_Ncoco : CroneEngine {
 			mod_p5=((sources_sig*mod_p5_Amts).sum * dest_gains[18] * 10);
 			mod_p6=((sources_sig*mod_p6_Amts).sum * dest_gains[19] * 10);
 
+			// Oscillators
 			b_ph1 = Phasor.ar(0, (p1f + mod_p1).abs * SampleDur.ir, 0, 1);
 			t1 = Trig1.ar(b_ph1 > 0.05, SampleDur.ir); 
 			p1 = ((b_ph1 + (fb_petals[5] * p1chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
@@ -202,34 +197,65 @@ Engine_Ncoco : CroneEngine {
 			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
 			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
 			
-			// --- SOURCE SIG 2: FOR GENERAL MODULATION (Uses Live Signals) ---
-			// CRITICAL FIX: Redefined here after Oscillators exist
+			// 6. EXTERNAL MODULATION (Live Signals)
+			// RE-DEFINE sources_sig with live oscillators
 			sources_sig = [out1, out2, out3, out4, out5, out6, K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 
 			driftL = LFNoise2.kr(0.5, 0.005); 
 			driftR = LFNoise2.kr(0.5, 0.005);
 
+			// Define NamedControls IMMEDIATELY before usage
+			mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!10);
+			mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!10);
 			mod_val_speedL=((sources_sig*mod_speedL_Amts).sum * dest_gains[0]).tanh.lag(0.01);
 			mod_val_speedR=((sources_sig*mod_speedR_Amts).sum * dest_gains[7]).tanh.lag(0.01);
 			
+			mod_ampL_Amts=NamedControl.kr(\mod_ampL_Amts, 0!10);
+			mod_ampR_Amts=NamedControl.kr(\mod_ampR_Amts, 0!10);
 			mod_val_ampL=((sources_sig*mod_ampL_Amts).sum * dest_gains[1]).tanh.lag(slew_amp);
 			mod_val_ampR=((sources_sig*mod_ampR_Amts).sum * dest_gains[8]).tanh.lag(slew_amp);
+
+			mod_fbL_Amts=NamedControl.kr(\mod_fbL_Amts, 0!10);
+			mod_fbR_Amts=NamedControl.kr(\mod_fbR_Amts, 0!10);
 			mod_val_fbL=((sources_sig*mod_fbL_Amts).sum * dest_gains[2]).tanh.lag(slew_amp);
 			mod_val_fbR=((sources_sig*mod_fbR_Amts).sum * dest_gains[9]).tanh.lag(slew_amp);
+
+			mod_filtL_Amts=NamedControl.kr(\mod_filtL_Amts, 0!10);
+			mod_filtR_Amts=NamedControl.kr(\mod_filtR_Amts, 0!10);
 			mod_val_filtL=((sources_sig*mod_filtL_Amts).sum * dest_gains[3]).tanh.lag(slew_misc);
 			mod_val_filtR=((sources_sig*mod_filtR_Amts).sum * dest_gains[10]).tanh.lag(slew_misc);
             
+			mod_volL_Amts=NamedControl.kr(\mod_volL_Amts, 0!10);
+			mod_volR_Amts=NamedControl.kr(\mod_volR_Amts, 0!10);
 			mod_val_volL=((sources_sig*mod_volL_Amts).sum * dest_gains[20]).tanh.lag(slew_amp);
 			mod_val_volR=((sources_sig*mod_volR_Amts).sum * dest_gains[21]).tanh.lag(slew_amp);
 			
+			// AUDIO INJECTION (Simplified)
+			mod_audioInL_Amts=NamedControl.kr(\mod_audioInL_Amts, 0!10);
+			mod_audioInR_Amts=NamedControl.kr(\mod_audioInR_Amts, 0!10);
+			// Sum -> LeakDC (Remove 0.5 offset) -> Gain/Drive -> Saturation
+			mod_val_audioInL = LeakDC.ar((sources_sig*mod_audioInL_Amts).sum);
+			mod_val_audioInL = (mod_val_audioInL * dest_gains[22] * 4.0).tanh;
+
+			mod_val_audioInR = LeakDC.ar((sources_sig*mod_audioInR_Amts).sum);
+			mod_val_audioInR = (mod_val_audioInR * dest_gains[23] * 4.0).tanh;
+			
+			mod_flipL_Amts=NamedControl.kr(\mod_flipL_Amts, 0!10);
+			mod_flipR_Amts=NamedControl.kr(\mod_flipR_Amts, 0!10);
 			mod_val_flipL = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
 			mod_val_flipR = (sources_sig*mod_flipR_Amts).sum * dest_gains[11];
 			
+			mod_skipL_Amts=NamedControl.kr(\mod_skipL_Amts, 0!10);
+			mod_skipR_Amts=NamedControl.kr(\mod_skipR_Amts, 0!10);
 			mod_val_skipL=Schmidt.ar((sources_sig*mod_skipL_Amts).sum * dest_gains[5], 0.6, 0.4);
 			mod_val_skipR=Schmidt.ar((sources_sig*mod_skipR_Amts).sum * dest_gains[12], 0.6, 0.4);
+
+			mod_recL_Amts=NamedControl.kr(\mod_recL_Amts, 0!10);
+			mod_recR_Amts=NamedControl.kr(\mod_recR_Amts, 0!10);
 			mod_val_recL=Schmidt.ar((sources_sig*mod_recL_Amts).sum * dest_gains[6], 0.6, 0.4);
 			mod_val_recR=Schmidt.ar((sources_sig*mod_recR_Amts).sum * dest_gains[13], 0.6, 0.4);
 
+			// Logic
 			recLogicL = (recL + mod_val_recL).mod(2);
 			recLogicR = (recR + mod_val_recR).mod(2);
 			gateRecL = Select.ar(recLogicL > 0.5, [K2A.ar(0), K2A.ar(1)]);
@@ -287,7 +313,7 @@ Engine_Ncoco : CroneEngine {
 
 			gainInL = Select.kr(dolbyL, [d_lin_inL, d_exp_inL, d_lin_inL, d_exp_inL, d_lin_inL, d_duck_inL, d_exp_inL, d_duck_inL, d_duck_inL]);
 			gainFbL = Select.kr(dolbyL, [d_lin_fbL, d_lin_fbL, d_exp_fbL, d_exp_fbL, d_duck_fbL, d_lin_fbL, d_duck_fbL, d_exp_fbL, d_duck_fbL]);
-			
+
 			gainInR = Select.kr(dolbyR, [d_lin_inR, d_exp_inR, d_lin_inR, d_exp_inR, d_lin_inR, d_duck_inR, d_exp_inR, d_duck_inR, d_duck_inR]);
 			gainFbR = Select.kr(dolbyR, [d_lin_fbR, d_lin_fbR, d_exp_fbR, d_exp_fbR, d_duck_fbR, d_lin_fbR, d_duck_fbR, d_exp_fbR, d_duck_fbR]);
 
@@ -296,8 +322,9 @@ Engine_Ncoco : CroneEngine {
 			feedbackL = LPF.ar(feedbackL, fixedFiltFreq).softclip;
 			feedbackR = LPF.ar(feedbackR, fixedFiltFreq).softclip;
 			
-			writeL = (dryL * gainInL * gateRecL) + (feedbackL * gainFbL);
-			writeR = (dryR * gainInR * gateRecR) + (feedbackR * gainFbR);
+			// SUM AUDIO INJECTION (With Gate)
+			writeL = ((dryL * gainInL) + mod_val_audioInL) * gateRecL + (feedbackL * gainFbL);
+			writeR = ((dryR * gainInR) + mod_val_audioInR) * gateRecR + (feedbackR * gainFbR);
 			
 			writeL = writeL.round(0.5 ** bitDepthL);
 			writeR = writeR.round(0.5 ** bitDepthR);
@@ -324,7 +351,12 @@ Engine_Ncoco : CroneEngine {
             finalVolR = (ampR + mod_val_volR).clip(0, 2);
 
 			master_out = Balance2.ar((readL + bleedL)*finalVolL, (readL + bleedL)*finalVolL, panL) + Balance2.ar((readR + bleedR)*finalVolR, (readR + bleedR)*finalVolR, panR);
-            Out.ar(out, Limiter.ar(master_out, 0.95)); 
+            
+            // MONITOR SUMMING
+            monitorL = inputL_sig + mod_val_audioInL;
+            monitorR = inputR_sig + mod_val_audioInR;
+            
+            Out.ar(out, Limiter.ar(master_out + [monitorL * monitorLevel, monitorR * monitorLevel], 0.95)); 
 			
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [ptrL/endL, ptrR/endR, gateRecL, gateRecR, flipStateL, flipStateR, (skipL + mod_val_skipL).clip(0,1), (skipR + mod_val_skipR).clip(0,1), out1, out2, out3, out4, out5, out6, envL, envR, yellowL, yellowR, finalRateL, finalRateR, Amplitude.kr(readL*ampL), Amplitude.kr(readR*ampR)]);
@@ -335,7 +367,7 @@ Engine_Ncoco : CroneEngine {
 		osc_responder = OSCFunc({ |msg| NetAddr("127.0.0.1", 10111).sendMsg("/update", *msg.drop(3)); }, '/update', context.server.addr).fix;
 
 		this.addCommand("clear_tape", "i", { |msg| var b=if(msg[1]==0,{bufL},{bufR}); b.zero; });
-		this.addCommand("dest_gains", "ffffffffffffffffffffff", { |msg| synth.setn(\dest_gains, msg.drop(1)) });
+		this.addCommand("dest_gains", "ffffffffffffffffffffffff", { |msg| synth.setn(\dest_gains, msg.drop(1)) });
 		
 		this.addCommand("write_tape", "isf", { |msg| 
 			var b=if(msg[1]==1,{bufL},{bufR}); 
@@ -429,6 +461,9 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("mod_p4", "ffffffffff", { |msg| synth.setn(\mod_p4_Amts, msg.drop(1)) });
 		this.addCommand("mod_p5", "ffffffffff", { |msg| synth.setn(\mod_p5_Amts, msg.drop(1)) });
 		this.addCommand("mod_p6", "ffffffffff", { |msg| synth.setn(\mod_p6_Amts, msg.drop(1)) });
+		this.addCommand("mod_audioInL", "ffffffffff", { |msg| synth.setn(\mod_audioInL_Amts, msg.drop(1)) });
+		this.addCommand("mod_audioInR", "ffffffffff", { |msg| synth.setn(\mod_audioInR_Amts, msg.drop(1)) });
+		this.addCommand("monitorLevel", "f", { |msg| synth.set(\monitorLevel, msg[1]) });
 	}
 
 	free { osc_responder.free; synth.free; bufL.free; bufR.free; }
