@@ -1,14 +1,12 @@
--- ncoco.lua v2024
+-- ncoco.lua v3003
 -- name: Ncoco
 -- desc: Hexaquantus Lo-Fi Delay & Chaos Computer.
 --       A Ciat-Lonbarde inspired instrument.
 -- tags: delay, lo-fi, chaos, feedback
 --
--- v2024 CHANGELOG:
--- 1. CALIBRATION: Expanded MIDI range to 1-126.
--- 2. FEEDBACK: Split point moved to 40% (0.4) for guaranteed integer resolution.
--- 3. PREAMP: Split at 50% Physical (Logical 0.5). Lower half = 1.0-3.0 range.
--- 4. VOLUME: Added Glue at 0dB point (Logical 0.75).
+-- v3003 CHANGELOG:
+-- 1. CONTROL: Global E2 now controls Monitor Volume (Direct Through).
+--    (Replaces Global Speed Macro).
 
 engine.name = 'Ncoco'
 
@@ -30,16 +28,13 @@ end
 -- --- HELPERS FOR 16n ---
 
 local function normalize_input(midi_val)
-   -- Expanded Range 1-126
    if midi_val < 1 then return 0.0 end
    if midi_val > 126 then return 1.0 end
-   -- AUDIO TAPER CALIBRATION (Physical Center = MIDI 80 = Logical 0.5)
    if midi_val <= 80 then return util.linlin(1, 80, 0.0, 0.5, midi_val)
    else return util.linlin(80, 126, 0.5, 1.0, midi_val) end
 end
 
 local function apply_glue(val_norm, param_id)
-   -- CENTER GLUE for Bipolar controls
    if param_id == "speed_offsetL" or param_id == "speed_offsetR" or 
       param_id == "filtL" or param_id == "filtR" or 
       param_id == "pan_l" or param_id == "pan_r" then
@@ -51,7 +46,6 @@ local function apply_glue(val_norm, param_id)
       else return util.linlin(center+width, 1, center, 1, val_norm) end
    end
    
-   -- VOLUME GLUE at 0dB (Logical 0.75)
    if param_id == "vol_l" or param_id == "vol_r" then
       local center = 0.75
       local width = 0.02
@@ -64,19 +58,14 @@ local function apply_glue(val_norm, param_id)
 end
 
 local function apply_curve(val_norm, param_id)
-   -- FEEDBACK: 40% SPLIT (v2024)
-   -- Ensures >1.5 steps per integer in high range
    if param_id == "fbL" or param_id == "fbR" then
       if val_norm < 0.40 then
-         -- Fast Rise: 0.0 to 0.70 in the first 40%
          return util.linlin(0, 0.40, 0.0, 0.70, val_norm)
       else
-         -- High Precision: 0.70 to 1.20 in the remaining 60%
          return util.linlin(0.40, 1.0, 0.70, 1.20, val_norm)
       end
    end
    
-   -- VOLUME: 75% SPLIT (0dB at 75%)
    if param_id == "vol_l" or param_id == "vol_r" then
       if val_norm < 0.75 then
          return util.linlin(0, 0.75, 0.0, 1.0, val_norm)
@@ -85,24 +74,18 @@ local function apply_curve(val_norm, param_id)
       end
    end
    
-   -- PREAMP: 50% PHYSICAL SPLIT (v2024)
-   -- Logical 0.5 (Physical Center) = Value 3.0
    if param_id == "preampL" or param_id == "preampR" then
       if val_norm < 0.5 then
-          -- Bottom Half: 1.0 to 3.0
           return util.linlin(0, 0.5, 1.0, 3.0, val_norm)
       else
-          -- Top Half: 3.0 to 20.0
           return util.linlin(0.5, 1.0, 3.0, 20.0, val_norm)
       end
    end
    
-   -- FILTERS: LINEAR BIPOLAR (-1 to 1)
    if param_id == "filtL" or param_id == "filtR" then
       return util.linlin(0, 1, -1.0, 1.0, val_norm)
    end
    
-   -- SPEED OFFSET: LINEAR BIPOLAR (+/- 0.25)
    if param_id == "speed_offsetL" or param_id == "speed_offsetR" then
       return util.linlin(0, 1, -0.25, 0.25, val_norm)
    end
@@ -293,7 +276,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v2024 Ready.")
+    print("Ncoco v3003 Ready.")
   end)
 end
 
@@ -378,7 +361,8 @@ function enc(n,d)
     elseif n==3 then params:delta("fb"..c, d/3) end 
   else
     if n==1 then params:delta("global_vol", d) end
-    if n==2 then params:delta("speedL", d/10); params:delta("speedR", d/10) end
+    -- CHANGED: E2 now controls Monitor Volume (v3003)
+    if n==2 then params:delta("monitor_vol", d) end 
     if n==3 then params:delta("global_chaos", d) end
   end
 end
