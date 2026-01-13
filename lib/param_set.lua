@@ -1,6 +1,6 @@
--- lib/param_set.lua v2025-FIX
--- CHANGELOG v2025:
--- 1. ADDED: Dolby Boost Option (Normal/High) to Coco Channels.
+-- lib/param_set.lua v3003
+-- CHANGELOG v3003:
+-- 1. GLOBAL: Added 'monitor_vol' control (0.0 - 1.2).
 
 local Params = {}
 
@@ -8,6 +8,10 @@ function Params.init(SC, G)
   params:add_separator("GLOBALS")
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
+  
+  -- NEW MONITOR CONTROL
+  params:add_control("monitor_vol", "Monitor Level", controlspec.new(0, 1.2, "lin", 0, 0.0))
+  params:set_action("monitor_vol", function(x) SC.set_monitor_level(x) end)
   
   params:add_control("global_chaos", "Global Chaos", controlspec.new(0, 1, "lin", 0, 0))
   params:set_action("global_chaos", function(x) for i=1,6 do params:set("p"..i.."chaos", x) end end)
@@ -77,7 +81,6 @@ function Params.init(SC, G)
     params:add_option("dolby"..s, "Dolby "..num, dolby_opts, 5) 
     params:set_action("dolby"..s, function(x) SC.set_dolby(i, x-1) end)
     
-    -- NEW OPTION
     params:add_option("dolby_boost"..s, "Dolby "..num.." Boost", {"Normal", "High"}, 1)
     params:set_action("dolby_boost"..s, function(x) SC.set_dolby_boost(i, x-1) end)
     

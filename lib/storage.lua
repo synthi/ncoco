@@ -1,8 +1,6 @@
--- lib/storage.lua v2010
--- CHANGELOG v2010:
--- 1. CRASH PREVENTION: Safe loading of Matrix. 
---    If loaded file has fewer columns (e.g. 20), it defaults to 0.0 for new cols (21,22).
---    This prevents 'nil' errors in the UI/Grid loops.
+-- lib/storage.lua v3000
+-- CHANGELOG v3000:
+-- 1. MATRIX: Load loop expanded to 24 for backward compatibility.
 
 local Storage = {}
 
@@ -46,11 +44,9 @@ function Storage.load(G, SC, pset_number)
     local data = tab.load(file)
     if data then
       if data.patch then
-        -- SAFE LOAD MATRIX
         for src=1, 10 do
-          if data.patch[src] then -- Check source exists
-             for dst=1, 22 do -- FORCE 22 LOOP
-                -- Use loaded value OR 0.0 if nil (Critical fix)
+          if data.patch[src] then 
+             for dst=1, 24 do -- EXPANDED TO 24
                 local val = data.patch[src][dst] or 0.0 
                 G.patch[src][dst] = val
                 if val ~= 0 then SC.update_matrix(dst, G) end
@@ -59,9 +55,8 @@ function Storage.load(G, SC, pset_number)
         end
       end
       
-      -- Safe Gains Load
       if data.dest_gains then 
-         for i=1, 22 do 
+         for i=1, 24 do -- EXPANDED TO 24
             G.dest_gains[i] = data.dest_gains[i] or 1.0 
          end
          SC.update_dest_gains(G) 

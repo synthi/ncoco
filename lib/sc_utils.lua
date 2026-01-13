@@ -1,6 +1,6 @@
--- lib/sc_utils.lua v2025-FIX
--- CHANGELOG v2025:
--- 1. COMMAND: Added set_dolby_boost wrapper.
+-- lib/sc_utils.lua v3003
+-- CHANGELOG v3003:
+-- 1. COMMAND: Added set_monitor_level.
 
 local SC = {}
 
@@ -11,7 +11,8 @@ local dest_names = {
   [12]="mod_flipR", [13]="mod_skipR", [14]="mod_recR",
   [15]="mod_p1", [16]="mod_p2", [17]="mod_p3", 
   [18]="mod_p4", [19]="mod_p5", [20]="mod_p6",
-  [21]="mod_volL", [22]="mod_volR"
+  [21]="mod_volL", [22]="mod_volR",
+  [23]="mod_audioInL", [24]="mod_audioInR"
 }
 
 function SC.update_matrix(dest_id, G)
@@ -44,10 +45,14 @@ function SC.set_preamp(id, val) engine[id==1 and "preampL" or "preampR"](val) en
 function SC.set_env_slew(id, val) engine[id==1 and "envSlewL" or "envSlewR"](val) end
 function SC.set_loop_len(val) engine.loopLen(val) end
 
--- NEW: Dolby Boost Command
 function SC.set_dolby_boost(id, val) 
     local cmd = (id==1) and "dolbyBoostL" or "dolbyBoostR"
     if engine[cmd] then engine[cmd](val) end
+end
+
+-- NEW
+function SC.set_monitor_level(val)
+   if engine.monitorLevel then engine.monitorLevel(val) end
 end
 
 return SC

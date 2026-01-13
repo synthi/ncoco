@@ -1,6 +1,6 @@
--- lib/grid_nav.lua v2016
--- CHANGELOG v2016:
--- 1. SPEED BUTTONS: Now update 'base_speed' and trigger recalc (Base + Offset).
+-- lib/grid_nav.lua v3000
+-- CHANGELOG v3000:
+-- 1. MAP: Mapped Audio Injection Jacks to (3,6) and (14,6).
 
 local SC = include('ncoco/lib/sc_utils')
 local GridNav = {}
@@ -27,7 +27,12 @@ function GridNav.init_map(G)
   map(7,1,'petal',1); map(6,1,'p_jack',15); map(10,1,'petal',2); map(11,1,'p_jack',16)
   map(5,3,'petal',6); map(4,3,'p_jack',20); map(12,3,'petal',3); map(13,3,'p_jack',17)
   map(7,5,'petal',5); map(6,5,'p_jack',19); map(10,5,'petal',4); map(11,5,'p_jack',18)
-  map(4,6,'env',7); map(13,6,'env',8)
+  
+  -- ENV + AUD IN ROW
+  map(3,6,'jack',23);  -- Audio In L
+  map(4,6,'env',7); 
+  map(13,6,'env',8); 
+  map(14,6,'jack',24); -- Audio In R
   
   map(1,7,'jack',2);  map(3,7,'jack',3);  map(5,7,'jack',4);
   map(7,7,'jack',21); map(10,7,'jack',22);
@@ -135,13 +140,10 @@ function GridNav.key(G, g, x, y, z, simulated)
     elseif obj.t=='skip' then params:set("skip"..side, 1)
     
     elseif obj.t=='fader' then 
-        -- SPEED LOGIC UPDATE
         local base = G.SPEED_TABLE[obj.m]
         local c_idx = obj.id
-        -- Update Base Speed
         G.coco[c_idx].base_speed = base
         
-        -- Recalculate Final: Base + Offset
         local suffix = (c_idx==1) and "L" or "R"
         local offset = params:get("speed_offset"..suffix)
         params:set("speed"..suffix, base + offset)

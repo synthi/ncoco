@@ -1,6 +1,6 @@
--- lib/ui.lua v2012
--- CHANGELOG v2012:
--- 1. POPUP: Added draw_popup function for 16n value display.
+-- lib/ui.lua v3003
+-- CHANGELOG v3003:
+-- 1. DISPLAY: E2 Label changed from SPD to MON (Monitor).
 
 local Q = include('ncoco/lib/quantussy')
 local UI = {}
@@ -10,7 +10,8 @@ local DST_NAMES = {
   [1]="SPD 1",[2]="AMP 1",[3]="FB 1",[4]="FILT 1",[5]="FLIP 1",[6]="SKIP 1",[7]="REC 1",
   [8]="SPD 2",[9]="AMP 2",[10]="FB 2",[11]="FILT 2",[12]="FLIP 2",[13]="SKIP 2",[14]="REC 2",
   [15]="P1 FRQ",[16]="P2 FRQ",[17]="P3 FRQ",[18]="P4 FRQ",[19]="P5 FRQ",[20]="P6 FRQ",
-  [21]="VOL 1", [22]="VOL 2"
+  [21]="VOL 1", [22]="VOL 2",
+  [23]="AUD IN 1", [24]="AUD IN 2"
 }
 local DLB_NAMES = {
   [1]="OFF", [2]="G-IN", [3]="G-FB", 
@@ -58,19 +59,9 @@ function UI.draw_popup(G)
     if util.time() > G.popup.deadline then 
        G.popup.active = false
     else 
-      -- Draw Black Box at bottom
-      screen.level(0)
-      screen.rect(10, 50, 108, 12) 
-      screen.fill()
-      
-      -- Border
-      screen.level(15)
-      screen.rect(10, 50, 108, 12)
-      screen.stroke()
-      
-      -- Text
-      screen.move(64, 58)
-      screen.text_center(G.popup.name .. ": " .. G.popup.value) 
+      screen.level(0); screen.rect(10, 50, 108, 12); screen.fill()
+      screen.level(15); screen.rect(10, 50, 108, 12); screen.stroke()
+      screen.move(64, 58); screen.text_center(G.popup.name .. ": " .. G.popup.value) 
     end
   end
 end
@@ -105,7 +96,9 @@ function UI.draw_main(G)
   screen.rect(70, 64, 1, -(or_ * 31)); screen.fill() 
   
   screen.level(3); screen.move(2, 8); screen.text("E1:VOL "); screen.level(15); screen.text(string.format("%.1f", params:get("global_vol") or 1))
-  screen.level(3); screen.move(2, 60); screen.text("E2:SPD "); screen.level(15); screen.text(string.format("%.2f", G.coco[1].real_speed or 1))
+  -- CHANGED: E2: MON (Monitor)
+  screen.level(3); screen.move(2, 60); screen.text("E2:MON "); screen.level(15); screen.text(string.format("%.2f", params:get("monitor_vol") or 0))
+  
   screen.level(3); screen.move(85, 60); screen.text("E3:CHS"); screen.level(15); screen.move(126, 60); screen.text_right(string.format("%.0f%%", params:get("global_chaos")*100))
   
   UI.draw_popup(G)

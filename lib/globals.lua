@@ -1,6 +1,6 @@
--- lib/globals.lua v2016
--- CHANGELOG v2016:
--- 1. STATE: Added 'base_speed' to coco state for Offset Logic.
+-- lib/globals.lua v3000
+-- CHANGELOG v3000:
+-- 1. MATRIX: Expanded to 24 destinations (Audio Injection L/R).
 
 local M = {}
 
@@ -20,7 +20,6 @@ M.SPEED_TABLE = {0.002, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0}
 M.FADER_BG = {2, 2, 2, 4, 2, 2, 2}
 
 M.coco = {
-  -- Added base_speed to track Grid selection independent of Fader Offset
   { pos=0, gate_rec=0, gate_flip=1, gate_skip=0, real_speed=1.0, out_level=0, base_speed=1.0 },
   { pos=0, gate_rec=0, gate_flip=1, gate_skip=0, real_speed=1.0, out_level=0, base_speed=1.0 }
 }
@@ -67,14 +66,15 @@ M.scope_head = 1
 M.petals = {} 
 for i=1, 6 do M.petals[i] = { freq=0.5, chaos=0.0 } end
 
+-- EXPANDED MATRIX (24)
 M.patch = {}
 for s=1, 10 do
   M.patch[s] = {}
-  for d=1, 22 do M.patch[s][d] = 0.0 end
+  for d=1, 24 do M.patch[s][d] = 0.0 end
 end
 
 M.dest_gains = {}
-for d=1, 22 do M.dest_gains[d] = 1.0 end
+for d=1, 24 do M.dest_gains[d] = 1.0 end
 
 M.focus = {
   edit_l = false, edit_r = false,
