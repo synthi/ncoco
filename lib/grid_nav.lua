@@ -1,6 +1,7 @@
--- lib/grid_nav.lua v3000
--- CHANGELOG v3000:
--- 1. MAP: Mapped Audio Injection Jacks to (3,6) and (14,6).
+-- lib/grid_nav.lua v3008
+-- CHANGELOG v3008:
+-- 1. BUG FIX: Inverse Patching Menu Release Logic.
+--    Releasing the Destination Anchor now correctly clears the view.
 
 local SC = include('ncoco/lib/sc_utils')
 local GridNav = {}
@@ -114,21 +115,79 @@ function GridNav.key(G, g, x, y, z, simulated)
   end
 
   if obj.t == 'edit' then if obj.id==1 then G.focus.edit_l=(z==1) end; if obj.id==2 then G.focus.edit_r=(z==1) end; return end
+  
   if obj.t == 'petal' or obj.t == 'env' then 
-    if z==1 then G.focus.source=obj.id; G.focus.last_dest=nil elseif G.focus.source==obj.id then G.focus.source=nil end 
+    if z==1 then 
+        -- INVERSE PATCHING LOGIC
+        if G.focus.inspect_dest then
+            G.focus.source = obj.id
+            G.focus.dest = G.focus.inspect_dest
+            G.focus.last_dest = G.focus.inspect_dest
+            G.focus.dest_timer = util.time()
+            
+            -- Cycle Logic 0 -> 0.5 -> 1.0 -> 0
+            local current = G.patch[obj.id][G.focus.dest]
+            local next_val = 0
+            if current == 0 then next_val = 0.5
+            elseif math.abs(current) < 0.9 then next_val = 1.0
+            else next_val = 0 end
+            
+            G.patch[obj.id][G.focus.dest] = next_val
+            SC.update_matrix(G.focus.dest, G)
+        else
+            G.focus.source=obj.id; G.focus.last_dest=nil 
+        end
+    
+    elseif z==0 then
+        -- CRITICAL FIX: Only clear source if we are NOT in Inverse Mode (holding a dest)
+        if G.focus.source==obj.id and not G.focus.inspect_dest then 
+            G.focus.source=nil 
+        end 
+    end 
     return 
   end
+  
   if (obj.t=='jack' or obj.t=='p_jack') then
     if z==1 then
       if G.focus.source then
-        G.focus.dest=obj.id; G.focus.last_dest=obj.id; G.focus.dest_timer=util.time()
-        clock.run(function() clock.sleep(0.8); if z==1 and G.focus.dest==obj.id then G.patch[G.focus.source][obj.id]=0.0; SC.update_matrix(obj.id,G) end end)
+        if G.focus.last_dest == obj.id then
+           -- QUICK PATCHING
+           local current = G.patch[G.focus.source][obj.id]
+           local next_val = 0
+           if current == 0 then next_val = 0.5
+           elseif math.abs(current) < 0.9 then next_val = 1.0
+           else next_val = 0 end
+           
+           G.patch[G.focus.source][obj.id] = next_val
+           SC.update_matrix(obj.id,G)
+        else
+           G.focus.dest=obj.id; G.focus.last_dest=obj.id; G.focus.dest_timer=util.time()
+           clock.run(function() 
+               clock.sleep(0.8)
+               if z==1 and G.focus.dest==obj.id then 
+                  G.patch[G.focus.source][obj.id]=0.0
+                  SC.update_matrix(obj.id,G) 
+               end 
+           end)
+        end
       else G.focus.inspect_dest = obj.id end
     else
-      if G.focus.source then
-        if util.time()-G.focus.dest_timer<0.8 then if G.patch[G.focus.source][obj.id]==0 then G.patch[G.focus.source][obj.id]=0.5; SC.update_matrix(obj.id,G) end end
+      -- JACK RELEASE PRIORITY FIX
+      -- 1. Are we releasing the Anchor (Inverse Mode)?
+      if G.focus.inspect_dest == obj.id then
+          G.focus.inspect_dest = nil
+          G.focus.source = nil -- Force close Patch Menu
+      
+      -- 2. Are we just releasing a destination target?
+      elseif G.focus.source then
+        if util.time()-G.focus.dest_timer<0.8 then 
+            if G.patch[G.focus.source][obj.id]==0 then 
+                G.patch[G.focus.source][obj.id]=0.5
+                SC.update_matrix(obj.id,G) 
+            end 
+        end
         G.focus.dest=nil
-      else G.focus.inspect_dest = nil end
+      end
     end
     return
   end
@@ -242,7 +301,10 @@ function GridNav.redraw(G, g)
         
       elseif obj.t=='skip' then 
         local c=G.coco[obj.id]
-        if GridNav.cache[x][y] == 15 then b=15 else b=4 end
+        -- CHANGED: Added OR logic for Skip LED
+        if GridNav.cache[x][y] == 15 then b=15 
+        elseif (c.gate_skip and c.gate_skip > 0.5) then b=10
+        else b=4 end
 
       elseif obj.t=='fader' then 
         local c=G.coco[obj.id]

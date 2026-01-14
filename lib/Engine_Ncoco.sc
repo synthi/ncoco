@@ -1,9 +1,9 @@
-// Engine_Ncoco.sc v3005
-// CHANGELOG v3005:
-// 1. CRITICAL FIX: Reverted variable structure to "Interleaved" to fix broken modulations.
-//    (NamedControls are now defined immediately before usage blocks).
-// 2. DSP FIX: Simplified Audio Injection math. Removed faulty bipolar conversion
-//    that caused DC offset. Now uses LeakDC directly on the sum.
+// Engine_Ncoco.sc v3013
+// CHANGELOG v3013:
+// 1. SIGNAL FLOW FIX: Moved Clock Bleed injection BEFORE the Output Filter.
+// 2. INPUT STAGE: Unified "Circuit Simulation" for SKIP, REC, FLIP (Slew/Schmidt).
+// 3. STUTTER: Server-Side Engine (TDuty/Latch/Dwhite).
+// 4. DRIFT/JITTER: Cubic Drift (0.08Hz) & Dynamic Jitter.
 
 Engine_Ncoco : CroneEngine {
 	var <synth;
@@ -34,7 +34,16 @@ Engine_Ncoco : CroneEngine {
 			panL= -0.5, panR=0.5,
 			
 			bitDepthL=8, bitDepthR=8, interp=2,                   
-			dolbyL=0, dolbyR=0, loopLen=8.0, skipMode=0,
+			dolbyL=0, dolbyR=0, loopLen=8.0, 
+			
+			// STUTTER ARGS
+			skipModeL=0, skipModeR=0, 
+			stutterRateL=0.1, stutterRateR=0.1,
+			stutterChaosL=0, stutterChaosR=0,
+			
+			// DRIFT ARG
+			driftAmt=0.005,
+			
 			preampL=1.0, preampR=1.0, envSlewL=0.05, envSlewR=0.05,
 			dolbyBoostL=0, dolbyBoostR=0,
 			monitorLevel=0,
@@ -45,10 +54,10 @@ Engine_Ncoco : CroneEngine {
 			
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
 
-			// --- VARS ---
+			// --- VARS DEFINITION BLOCK ---
 			var dest_gains;
 			
-			// Mod Amts (Declared here, defined in body)
+			// Mod Amts
 			var mod_speedL_Amts, mod_speedR_Amts;
 			var mod_flipL_Amts, mod_flipR_Amts;
 			var mod_skipL_Amts, mod_skipR_Amts;
@@ -72,21 +81,23 @@ Engine_Ncoco : CroneEngine {
 			var sources_sig; 
 			
 			// Mod Values
-			var mod_val_speedL, mod_val_speedR, mod_val_flipL, mod_val_flipR;
-			var mod_val_skipL, mod_val_skipR, mod_val_ampL, mod_val_ampR;
+			var raw_mod_flipL, raw_mod_flipR, mod_val_flipL, mod_val_flipR;
+			var raw_mod_skipL, raw_mod_skipR, mod_val_skipL, mod_val_skipR;
+			var raw_mod_recL, raw_mod_recR, mod_val_recL, mod_val_recR;
+			
+			var mod_val_speedL, mod_val_speedR;
+			var mod_val_ampL, mod_val_ampR;
 			var mod_val_fbL, mod_val_fbR, mod_val_filtL, mod_val_filtR;
-			var mod_val_recL, mod_val_recR;
 			var mod_val_volL, mod_val_volR;
 			var mod_val_audioInL, mod_val_audioInR;
 			var mod_p1, mod_p2, mod_p3, mod_p4, mod_p5, mod_p6;
 			
 			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR;
-			var trigSkipL, trigSkipR, readL, readR, writeL, writeR;
+			var readL, readR, writeL, writeR;
 			var gateRecL, gateRecR; 
 			var noiseL, noiseR, baseSR_L, baseSR_R, interpL, interpR;
 			var is8L, is12L, is8R, is12R, fixedFiltFreq;
 			var endL, endR;
-			var jumpTrigL, jumpTrigR;
 			var yellowL, yellowR;
 			var totalFiltL, totalFiltR;
 			
@@ -110,17 +121,30 @@ Engine_Ncoco : CroneEngine {
 			
 			var preampNoiseL, preampNoiseR;
 			var feedback_in, fb_petals, fb_yellow;
+			
+			// STUTTER INTERNAL VARS
+			var gateSkipL, gateSkipR;
+			var freezePosL, freezePosR, rawPtrL, rawPtrR;
+			var minTime, maxTime;
+			var lowerL, upperL, lowerR, upperR;
+			var demandL, demandR;
+			var autoTrigL, autoTrigR;
+			var finalJumpTrigL, finalJumpTrigR;
+			var resetPosL, resetPosR;
+			
+			// JITTER VARS
+			var jitterAmountL, jitterAmountR;
 
 			// --- DSP GRAPH START ---
 			
 			dest_gains = NamedControl.kr(\dest_gains, 1!24); 
 
-			// 1. Feedback Input
+			// 1. Feedback
 			feedback_in = LocalIn.ar(8);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
 
-			// 2. Preamp & Noise
+			// 2. Preamp
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
 
@@ -136,7 +160,7 @@ Engine_Ncoco : CroneEngine {
 			envL_dolby = Select.kr(dolbyBoostL, [envL_raw, envL]);
 			envR_dolby = Select.kr(dolbyBoostR, [envR_raw, envR]);
 
-			// 4. Sample Rate & Noise Gen
+			// 4. Sample Rate & Logic
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.00025));
@@ -149,7 +173,7 @@ Engine_Ncoco : CroneEngine {
 
 			yellowL = DC.ar(0); yellowR = DC.ar(0);
 			
-			// 5. INTERNAL MODULATION (Petals FM)
+			// 5. INTERNAL MODULATION
 			sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 			
 			mod_p1_Amts=NamedControl.kr(\mod_p1_Amts, 0!10);
@@ -166,7 +190,6 @@ Engine_Ncoco : CroneEngine {
 			mod_p5=((sources_sig*mod_p5_Amts).sum * dest_gains[18] * 10);
 			mod_p6=((sources_sig*mod_p6_Amts).sum * dest_gains[19] * 10);
 
-			// Oscillators
 			b_ph1 = Phasor.ar(0, (p1f + mod_p1).abs * SampleDur.ir, 0, 1);
 			t1 = Trig1.ar(b_ph1 > 0.05, SampleDur.ir); 
 			p1 = ((b_ph1 + (fb_petals[5] * p1chaos.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
@@ -197,14 +220,13 @@ Engine_Ncoco : CroneEngine {
 			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
 			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
 			
-			// 6. EXTERNAL MODULATION (Live Signals)
-			// RE-DEFINE sources_sig with live oscillators
+			// 6. EXTERNAL MODULATION
 			sources_sig = [out1, out2, out3, out4, out5, out6, K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 
-			driftL = LFNoise2.kr(0.5, 0.005); 
-			driftR = LFNoise2.kr(0.5, 0.005);
+			// DRIFT (Cubic Interpolation - 0.08Hz)
+			driftL = LFDNoise3.kr(0.08, driftAmt); 
+			driftR = LFDNoise3.kr(0.08, driftAmt);
 
-			// Define NamedControls IMMEDIATELY before usage
 			mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!10);
 			mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!10);
 			mod_val_speedL=((sources_sig*mod_speedL_Amts).sum * dest_gains[0]).tanh.lag(0.01);
@@ -230,32 +252,41 @@ Engine_Ncoco : CroneEngine {
 			mod_val_volL=((sources_sig*mod_volL_Amts).sum * dest_gains[20]).tanh.lag(slew_amp);
 			mod_val_volR=((sources_sig*mod_volR_Amts).sum * dest_gains[21]).tanh.lag(slew_amp);
 			
-			// AUDIO INJECTION (Simplified)
 			mod_audioInL_Amts=NamedControl.kr(\mod_audioInL_Amts, 0!10);
 			mod_audioInR_Amts=NamedControl.kr(\mod_audioInR_Amts, 0!10);
-			// Sum -> LeakDC (Remove 0.5 offset) -> Gain/Drive -> Saturation
 			mod_val_audioInL = LeakDC.ar((sources_sig*mod_audioInL_Amts).sum);
 			mod_val_audioInL = (mod_val_audioInL * dest_gains[22] * 4.0).tanh;
-
 			mod_val_audioInR = LeakDC.ar((sources_sig*mod_audioInR_Amts).sum);
 			mod_val_audioInR = (mod_val_audioInR * dest_gains[23] * 4.0).tanh;
 			
+			// --- UNIFIED INPUT STAGE (Flip, Skip, Rec) ---
+			// Topology: Sum -> Schmidt Trigger (0.6/0.4) -> Asymmetric Slew (Up:Inf, Dn:50ms) -> Gate > 0.01
+			
+			// FLIP
 			mod_flipL_Amts=NamedControl.kr(\mod_flipL_Amts, 0!10);
 			mod_flipR_Amts=NamedControl.kr(\mod_flipR_Amts, 0!10);
-			mod_val_flipL = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
-			mod_val_flipR = (sources_sig*mod_flipR_Amts).sum * dest_gains[11];
+			raw_mod_flipL = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
+			raw_mod_flipR = (sources_sig*mod_flipR_Amts).sum * dest_gains[11];
+			mod_val_flipL = Slew.ar(Schmidt.ar(raw_mod_flipL, 0.6, 0.4), 10000, 20) > 0.01;
+			mod_val_flipR = Slew.ar(Schmidt.ar(raw_mod_flipR, 0.6, 0.4), 10000, 20) > 0.01;
 			
+			// SKIP
 			mod_skipL_Amts=NamedControl.kr(\mod_skipL_Amts, 0!10);
 			mod_skipR_Amts=NamedControl.kr(\mod_skipR_Amts, 0!10);
-			mod_val_skipL=Schmidt.ar((sources_sig*mod_skipL_Amts).sum * dest_gains[5], 0.6, 0.4);
-			mod_val_skipR=Schmidt.ar((sources_sig*mod_skipR_Amts).sum * dest_gains[12], 0.6, 0.4);
+			raw_mod_skipL = (sources_sig*mod_skipL_Amts).sum * dest_gains[5];
+			raw_mod_skipR = (sources_sig*mod_skipR_Amts).sum * dest_gains[12];
+			mod_val_skipL = Slew.ar(Schmidt.ar(raw_mod_skipL, 0.6, 0.4), 10000, 20) > 0.01;
+			mod_val_skipR = Slew.ar(Schmidt.ar(raw_mod_skipR, 0.6, 0.4), 10000, 20) > 0.01;
 
+			// REC
 			mod_recL_Amts=NamedControl.kr(\mod_recL_Amts, 0!10);
 			mod_recR_Amts=NamedControl.kr(\mod_recR_Amts, 0!10);
-			mod_val_recL=Schmidt.ar((sources_sig*mod_recL_Amts).sum * dest_gains[6], 0.6, 0.4);
-			mod_val_recR=Schmidt.ar((sources_sig*mod_recR_Amts).sum * dest_gains[13], 0.6, 0.4);
+			raw_mod_recL = (sources_sig*mod_recL_Amts).sum * dest_gains[6];
+			raw_mod_recR = (sources_sig*mod_recR_Amts).sum * dest_gains[13];
+			mod_val_recL = Slew.ar(Schmidt.ar(raw_mod_recL, 0.6, 0.4), 10000, 20) > 0.01;
+			mod_val_recR = Slew.ar(Schmidt.ar(raw_mod_recR, 0.6, 0.4), 10000, 20) > 0.01;
 
-			// Logic
+			// Logic Application
 			recLogicL = (recL + mod_val_recL).mod(2);
 			recLogicR = (recR + mod_val_recR).mod(2);
 			gateRecL = Select.ar(recLogicL > 0.5, [K2A.ar(0), K2A.ar(1)]);
@@ -267,21 +298,48 @@ Engine_Ncoco : CroneEngine {
 			baseSpeedL = (speedL + mod_val_speedL + driftL).lag(0.01);
 			baseSpeedR = (speedR + mod_val_speedR + driftR).lag(0.01);
 
-			flipLogicL = (flipL + (mod_val_flipL > 0.1)).mod(2);
-			flipLogicR = (flipR + (mod_val_flipR > 0.1)).mod(2);
+			flipLogicL = (flipL + mod_val_flipL).mod(2);
+			flipLogicR = (flipR + mod_val_flipR).mod(2);
 			flipStateL = flipLogicL; flipStateR = flipLogicR;
 
 			finalRateL = Select.ar(flipLogicL > 0.5, [baseSpeedL, baseSpeedL * -1]);
 			finalRateR = Select.ar(flipLogicR > 0.5, [baseSpeedR, baseSpeedR * -1]);
 			
-			jumpTrigL = Changed.ar(skipL + mod_val_skipL);
-			jumpTrigR = Changed.ar(skipR + mod_val_skipR);
-			
 			endL = (loopLen * 48000).min(BufFrames.kr(bufL));
 			endR = (loopLen * 48000).min(BufFrames.kr(bufR));
 			
-			ptrL = Phasor.ar(jumpTrigL, finalRateL * BufRateScale.kr(bufL), 0, endL, TRand.ar(0, endL, jumpTrigL));
-			ptrR = Phasor.ar(jumpTrigR, finalRateR * BufRateScale.kr(bufR), 0, endR, TRand.ar(0, endR, jumpTrigR));
+			// --- STUTTER LOGIC (Server-Side) ---
+			
+			gateSkipL = ((skipL + mod_val_skipL) > 0.5);
+			gateSkipR = ((skipR + mod_val_skipR) > 0.5);
+			
+			minTime = 0.001; maxTime = 0.350;
+			
+			// Stutter Math
+			lowerL = stutterRateL - (stutterChaosL * (stutterRateL - minTime));
+			upperL = stutterRateL + (stutterChaosL * (maxTime - stutterRateL));
+			demandL = Dwhite(lowerL, upperL);
+			autoTrigL = TDuty.ar(demandL, reset: gateSkipL) * gateSkipL;
+			
+			lowerR = stutterRateR - (stutterChaosR * (stutterRateR - minTime));
+			upperR = stutterRateR + (stutterChaosR * (maxTime - stutterRateR));
+			demandR = Dwhite(lowerR, upperR);
+			autoTrigR = TDuty.ar(demandR, reset: gateSkipR) * gateSkipR;
+			
+			finalJumpTrigL = Select.ar(skipModeL, [Changed.ar(gateSkipL), autoTrigL]);
+			finalJumpTrigR = Select.ar(skipModeR, [Changed.ar(gateSkipR), autoTrigR]);
+			
+			// Freeze Logic
+			rawPtrL = fb_yellow[0] * endL;
+			rawPtrR = fb_yellow[1] * endR;
+			freezePosL = Latch.ar(rawPtrL, gateSkipL);
+			freezePosR = Latch.ar(rawPtrR, gateSkipR);
+			
+			resetPosL = Select.ar(skipModeL, [TRand.ar(0, endL, finalJumpTrigL), freezePosL]);
+			resetPosR = Select.ar(skipModeR, [TRand.ar(0, endR, finalJumpTrigR), freezePosR]);
+			
+			ptrL = Phasor.ar(finalJumpTrigL, finalRateL * BufRateScale.kr(bufL), 0, endL, resetPosL);
+			ptrR = Phasor.ar(finalJumpTrigR, finalRateR * BufRateScale.kr(bufR), 0, endR, resetPosR);
 			
 			yellowL = (ptrL / endL);
 			yellowR = (ptrR / endR);
@@ -293,6 +351,10 @@ Engine_Ncoco : CroneEngine {
 
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
+			
+			// --- SIGNAL FLOW FIX: ADD BLEED BEFORE FILTER ---
+			readL = readL + bleedL;
+			readR = readR + bleedR;
 			
 			envFbL = Amplitude.kr(readL, 0.01, 0.08); 
 			envFbR = Amplitude.kr(readR, 0.01, 0.08);
@@ -322,15 +384,18 @@ Engine_Ncoco : CroneEngine {
 			feedbackL = LPF.ar(feedbackL, fixedFiltFreq).softclip;
 			feedbackR = LPF.ar(feedbackR, fixedFiltFreq).softclip;
 			
-			// SUM AUDIO INJECTION (With Gate)
 			writeL = ((dryL * gainInL) + mod_val_audioInL) * gateRecL + (feedbackL * gainFbL);
 			writeR = ((dryR * gainInR) + mod_val_audioInR) * gateRecR + (feedbackR * gainFbR);
 			
 			writeL = writeL.round(0.5 ** bitDepthL);
 			writeR = writeR.round(0.5 ** bitDepthR);
 			
-			writeL = Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(0.02))));
-			writeR = Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(0.02))));
+			// --- DYNAMIC JITTER ---
+			jitterAmountL = (is8L * 0.02) + (is12L * 0.01) + ((1 - is8L - is12L) * 0.005);
+			jitterAmountR = (is8R * 0.02) + (is12R * 0.01) + ((1 - is8R - is12R) * 0.005);
+			
+			writeL = Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountL))));
+			writeR = Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountR))));
 			
 			BufWr.ar(writeL, bufL, ptrL);
 			BufWr.ar(writeR, bufR, ptrR);
@@ -350,9 +415,8 @@ Engine_Ncoco : CroneEngine {
             finalVolL = (ampL + mod_val_volL).clip(0, 2);
             finalVolR = (ampR + mod_val_volR).clip(0, 2);
 
-			master_out = Balance2.ar((readL + bleedL)*finalVolL, (readL + bleedL)*finalVolL, panL) + Balance2.ar((readR + bleedR)*finalVolR, (readR + bleedR)*finalVolR, panR);
+			master_out = Balance2.ar(readL*finalVolL, readL*finalVolL, panL) + Balance2.ar(readR*finalVolR, readR*finalVolR, panR);
             
-            // MONITOR SUMMING
             monitorL = inputL_sig + mod_val_audioInL;
             monitorR = inputR_sig + mod_val_audioInR;
             
@@ -379,7 +443,6 @@ Engine_Ncoco : CroneEngine {
 			var target_buf = if(msg[1]==1,{bufL},{bufR}); 
 			var path = msg[2];
 			var maxFrames = target_buf.numFrames; 
-			
 			if(File.exists(path)) {
 				Buffer.read(context.server, path, 0, maxFrames, action: { |temp|
 					temp.copyData(target_buf, 0, 0, temp.numFrames);
@@ -389,7 +452,14 @@ Engine_Ncoco : CroneEngine {
 			}
 		});
 
-		this.addCommand("skipMode", "i", { |msg| synth.set(\skipMode, msg[1]) });
+		this.addCommand("skipModeL", "i", { |msg| synth.set(\skipModeL, msg[1]) });
+		this.addCommand("skipModeR", "i", { |msg| synth.set(\skipModeR, msg[1]) });
+		this.addCommand("stutterRateL", "f", { |msg| synth.set(\stutterRateL, msg[1]) });
+		this.addCommand("stutterRateR", "f", { |msg| synth.set(\stutterRateR, msg[1]) });
+		this.addCommand("stutterChaosL", "f", { |msg| synth.set(\stutterChaosL, msg[1]) });
+		this.addCommand("stutterChaosR", "f", { |msg| synth.set(\stutterChaosR, msg[1]) });
+		this.addCommand("driftAmt", "f", { |msg| synth.set(\driftAmt, msg[1]) });
+
 		this.addCommand("speedL", "f", { |msg| synth.set(\speedL, msg[1]) });
 		this.addCommand("speedR", "f", { |msg| synth.set(\speedR, msg[1]) });
 		this.addCommand("fbL", "f", { |msg| synth.set(\fbL, msg[1]) });

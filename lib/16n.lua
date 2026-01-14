@@ -1,8 +1,8 @@
--- lib/16n.lua v2019
--- CHANGELOG v2019:
--- 1. SMOOTHNESS FIX: Removed the '> 2' delta filter.
---    Now passes every single value change (1-step resolution).
--- 2. DRIVER: Retains Cascade Fallback logic (Sysex -> Default).
+-- lib/16n.lua v3007
+-- CHANGELOG v3007:
+-- 1. ROLLBACK: Removed "Smart Wake-Up" filter completely.
+--    Reason: The filter was blocking smooth 1-step movements, turning them into steps/zipper noise.
+--    Resolution (128 steps) is restored. Audio should be smooth.
 
 local _16n = {}
 _16n.last_values = {}
@@ -51,13 +51,9 @@ _16n.init = function(cc_cb_fn)
         elseif d.type == 'cc' and cc_cb_fn ~= nil then 
            local last = _16n.last_values[d.cc] or -1
            
-           -- FIX: Removed "> 2" threshold. Now accepts ANY change.
+           -- RESTORED ORIGINAL LOGIC: Pass every single change
            if d.val ~= last then
              _16n.last_values[d.cc] = d.val
-             
-             -- DEBUG: Monitor raw values to verify smoothness
-             -- print("RAW MIDI: CC="..d.cc.." Val="..d.val)
-             
              cc_cb_fn(d) 
            end
         end

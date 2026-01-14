@@ -1,6 +1,6 @@
--- lib/globals.lua v3000
--- CHANGELOG v3000:
--- 1. MATRIX: Expanded to 24 destinations (Audio Injection L/R).
+-- lib/globals.lua v3005
+-- CHANGELOG v3005:
+-- 1. SCOPE: Increased SCOPE_LEN to 128 to fix visual cutoff on inspector.
 
 local M = {}
 
@@ -54,7 +54,8 @@ M.trails = { {}, {} }
 for i=1, M.TRAIL_SIZE do M.trails[1][i]=0; M.trails[2][i]=0 end
 M.trail_head = {1, 1}
 
-M.SCOPE_LEN = 60
+-- CHANGED: Increased to 128 to match screen width
+M.SCOPE_LEN = 128
 M.scope_history = {}
 M.sources_val = {0,0,0,0,0,0,0,0,0,0} 
 for i=1, 10 do 
