@@ -1,12 +1,13 @@
--- ncoco.lua v3003
+-- ncoco.lua v3012
 -- name: Ncoco
 -- desc: Hexaquantus Lo-Fi Delay & Chaos Computer.
 --       A Ciat-Lonbarde inspired instrument.
 -- tags: delay, lo-fi, chaos, feedback
 --
--- v3003 CHANGELOG:
--- 1. CONTROL: Global E2 now controls Monitor Volume (Direct Through).
---    (Replaces Global Speed Macro).
+-- v3012 CHANGELOG:
+-- 1. ROLLBACK: Removed Lua Stutter coroutines (Server-side handling).
+-- 2. INIT: Added defaults for new Engine commands (Drift/Skip Mode).
+-- 3. SYS: Defined local metros.
 
 engine.name = 'Ncoco'
 
@@ -19,7 +20,10 @@ local status, _16n = pcall(include, 'ncoco/lib/16n')
 local status, Params = pcall(include, 'ncoco/lib/param_set')
 local status, Storage = pcall(include, 'ncoco/lib/storage') 
 
+-- DEFINED LOCAL METROS
 local g = grid.connect()
+local grid_metro
+local screen_metro
 
 if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
@@ -186,7 +190,10 @@ function init()
     SC.set_feedback(1, 0.9); SC.set_feedback(2, 0.9)
     SC.set_loop_len(8.0)
     SC.set_bitdepth(1, 8); SC.set_bitdepth(2, 8) 
-    engine.skipMode(0)
+    
+    -- INIT NEW ENGINE PARAMS (Defaults)
+    engine.skipModeL(0); engine.skipModeR(0)
+    engine.driftAmt(0.005) -- Default centered drift
 
     for i=1, 6 do
       local seed_lfo = 0.2 + (math.random() * 0.9)
@@ -276,7 +283,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v3003 Ready.")
+    print("Ncoco v3012 Ready.")
   end)
 end
 
@@ -361,7 +368,6 @@ function enc(n,d)
     elseif n==3 then params:delta("fb"..c, d/3) end 
   else
     if n==1 then params:delta("global_vol", d) end
-    -- CHANGED: E2 now controls Monitor Volume (v3003)
     if n==2 then params:delta("monitor_vol", d) end 
     if n==3 then params:delta("global_chaos", d) end
   end
@@ -369,6 +375,17 @@ end
 
 function key(n,z)
   if not G.loaded then return end
+  
+  -- Phase Inverter Logic
+  if G.focus.source and G.focus.last_dest and z==1 then
+     if n==2 or n==3 then
+        local s, dt = G.focus.source, G.focus.last_dest
+        G.patch[s][dt] = G.patch[s][dt] * -1
+        SC.update_matrix(dt, G)
+        return
+     end
+  end
+
   if n==1 then return end 
   if z==1 then
     if G.focus.source and G.focus.source <= 6 then
@@ -401,9 +418,6 @@ function key(n,z)
          local v = 1 - params:get("recL")
          params:set("recL", v); params:set("recR", v)
        end 
-       if n==3 then
-         engine.skipMode(params:get("skip_mode") == 1 and 1 or 0) 
-       end
     end
   end
 end
