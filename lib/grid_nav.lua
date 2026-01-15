@@ -1,12 +1,13 @@
--- lib/grid_nav.lua v3008
--- CHANGELOG v3008:
--- 1. BUG FIX: Inverse Patching Menu Release Logic.
---    Releasing the Destination Anchor now correctly clears the view.
+-- lib/grid_nav.lua v4003
+-- CHANGELOG v4003:
+-- 1. VISUAL FIX: Petal 1 LED now modulates correctly (removed hardcoded override).
 
 local SC = include('ncoco/lib/sc_utils')
 local GridNav = {}
 GridNav.cache = {}
 GridNav.debounce = {} 
+GridNav.snap_timers = {}
+GridNav.is_dirty = true
 
 function GridNav.init_map(G)
   G.grid_map = {}
@@ -18,9 +19,11 @@ function GridNav.init_map(G)
   
   local function map(x, y, type, id, meta) G.grid_map[x][y] = {t=type, id=id, m=meta} end
 
-  map(1,1,'edit',1); map(2,1,'edit',1); map(1,2,'edit',1); map(2,2,'edit',1)
-  map(15,1,'edit',2); map(16,1,'edit',2); map(15,2,'edit',2); map(16,2,'edit',2)
-  map(3,1,'seq',1); map(4,1,'seq',2); map(13,1,'seq',3); map(14,1,'seq',4)
+  for x=1,4 do map(x, 1, 'snap', x) end
+  for x=13,16 do map(x, 1, 'seq', x-12) end
+
+  map(1,2,'edit',1); map(2,2,'edit',1); map(3,2,'edit',1)
+  map(14,2,'edit',2); map(15,2,'edit',2); map(16,2,'edit',2)
 
   map(1,3,'rec',1); map(2,3,'jack',7); map(1,4,'flip',1); map(2,4,'jack',5); map(1,5,'skip',1); map(2,5,'jack',6)
   map(16,3,'rec',2); map(15,3,'jack',14); map(16,4,'flip',2); map(15,4,'jack',12); map(16,5,'skip',2); map(15,5,'jack',13)
@@ -29,12 +32,7 @@ function GridNav.init_map(G)
   map(5,3,'petal',6); map(4,3,'p_jack',20); map(12,3,'petal',3); map(13,3,'p_jack',17)
   map(7,5,'petal',5); map(6,5,'p_jack',19); map(10,5,'petal',4); map(11,5,'p_jack',18)
   
-  -- ENV + AUD IN ROW
-  map(3,6,'jack',23);  -- Audio In L
-  map(4,6,'env',7); 
-  map(13,6,'env',8); 
-  map(14,6,'jack',24); -- Audio In R
-  
+  map(3,6,'jack',23); map(4,6,'env',7); map(13,6,'env',8); map(14,6,'jack',24);
   map(1,7,'jack',2);  map(3,7,'jack',3);  map(5,7,'jack',4);
   map(7,7,'jack',21); map(10,7,'jack',22);
   map(12,7,'jack',11); map(14,7,'jack',10); map(16,7,'jack',9);
@@ -47,6 +45,8 @@ end
 function GridNav.key(G, g, x, y, z, simulated)
   local obj = G.grid_map[x] and G.grid_map[x][y]
   if not obj then return end
+  
+  GridNav.is_dirty = true
   
   if z == 1 and not simulated then
      local id_key = x..","..y
@@ -80,6 +80,38 @@ function GridNav.key(G, g, x, y, z, simulated)
     GridNav.cache[x][y] = -1
   end
 
+  if obj.t == 'snap' then
+     if z == 1 then
+        GridNav.snap_timers[obj.id] = util.time()
+        clock.run(function()
+           clock.sleep(1.6) 
+           if GridNav.snap_timers[obj.id] ~= 0 then
+              G.snap_clear(obj.id)
+              GridNav.snap_timers[obj.id] = -1 
+              GridNav.is_dirty = true
+           end
+        end)
+     elseif z == 0 then
+        if GridNav.snap_timers[obj.id] == -1 then
+           GridNav.snap_timers[obj.id] = 0
+        else
+           local t = util.time() - GridNav.snap_timers[obj.id]
+           GridNav.snap_timers[obj.id] = 0
+           if t < 1.6 then
+              if G.snapshots[obj.id] == nil then
+                 G.snap_save(obj.id)
+              elseif G.active_snapshot == obj.id then
+                 G.snap_update(obj.id)
+              else
+                 G.snap_load(obj.id)
+              end
+           end
+        end
+        GridNav.is_dirty = true
+     end
+     return
+  end
+
   if obj.t == 'seq' and G.sequencers then
      local s = G.sequencers[obj.id]
      if s then 
@@ -100,6 +132,7 @@ function GridNav.key(G, g, x, y, z, simulated)
                      if s.state == 3 then return end
                      if s.state == 2 then s.state = 4 else s.state = 2 end
                      s.double_click_timer = nil
+                     GridNav.is_dirty = true
                   end)
                end
             elseif s.state == 3 then
@@ -118,31 +151,18 @@ function GridNav.key(G, g, x, y, z, simulated)
   
   if obj.t == 'petal' or obj.t == 'env' then 
     if z==1 then 
-        -- INVERSE PATCHING LOGIC
         if G.focus.inspect_dest then
-            G.focus.source = obj.id
-            G.focus.dest = G.focus.inspect_dest
-            G.focus.last_dest = G.focus.inspect_dest
-            G.focus.dest_timer = util.time()
-            
-            -- Cycle Logic 0 -> 0.5 -> 1.0 -> 0
+            G.focus.source = obj.id; G.focus.dest = G.focus.inspect_dest
+            G.focus.last_dest = G.focus.inspect_dest; G.focus.dest_timer = util.time()
             local current = G.patch[obj.id][G.focus.dest]
             local next_val = 0
-            if current == 0 then next_val = 0.5
-            elseif math.abs(current) < 0.9 then next_val = 1.0
-            else next_val = 0 end
-            
-            G.patch[obj.id][G.focus.dest] = next_val
-            SC.update_matrix(G.focus.dest, G)
+            if current == 0 then next_val = 0.5 elseif math.abs(current) < 0.9 then next_val = 1.0 else next_val = 0 end
+            G.patch[obj.id][G.focus.dest] = next_val; SC.update_matrix(G.focus.dest, G)
         else
             G.focus.source=obj.id; G.focus.last_dest=nil 
         end
-    
     elseif z==0 then
-        -- CRITICAL FIX: Only clear source if we are NOT in Inverse Mode (holding a dest)
-        if G.focus.source==obj.id and not G.focus.inspect_dest then 
-            G.focus.source=nil 
-        end 
+        if G.focus.source==obj.id and not G.focus.inspect_dest then G.focus.source=nil end 
     end 
     return 
   end
@@ -151,40 +171,23 @@ function GridNav.key(G, g, x, y, z, simulated)
     if z==1 then
       if G.focus.source then
         if G.focus.last_dest == obj.id then
-           -- QUICK PATCHING
            local current = G.patch[G.focus.source][obj.id]
            local next_val = 0
-           if current == 0 then next_val = 0.5
-           elseif math.abs(current) < 0.9 then next_val = 1.0
-           else next_val = 0 end
-           
-           G.patch[G.focus.source][obj.id] = next_val
-           SC.update_matrix(obj.id,G)
+           if current == 0 then next_val = 0.5 elseif math.abs(current) < 0.9 then next_val = 1.0 else next_val = 0 end
+           G.patch[G.focus.source][obj.id] = next_val; SC.update_matrix(obj.id,G)
         else
            G.focus.dest=obj.id; G.focus.last_dest=obj.id; G.focus.dest_timer=util.time()
            clock.run(function() 
                clock.sleep(0.8)
-               if z==1 and G.focus.dest==obj.id then 
-                  G.patch[G.focus.source][obj.id]=0.0
-                  SC.update_matrix(obj.id,G) 
-               end 
+               if z==1 and G.focus.dest==obj.id then G.patch[G.focus.source][obj.id]=0.0; SC.update_matrix(obj.id,G) end 
            end)
         end
       else G.focus.inspect_dest = obj.id end
     else
-      -- JACK RELEASE PRIORITY FIX
-      -- 1. Are we releasing the Anchor (Inverse Mode)?
-      if G.focus.inspect_dest == obj.id then
-          G.focus.inspect_dest = nil
-          G.focus.source = nil -- Force close Patch Menu
-      
-      -- 2. Are we just releasing a destination target?
+      if G.focus.inspect_dest == obj.id then G.focus.inspect_dest = nil; G.focus.source = nil
       elseif G.focus.source then
         if util.time()-G.focus.dest_timer<0.8 then 
-            if G.patch[G.focus.source][obj.id]==0 then 
-                G.patch[G.focus.source][obj.id]=0.5
-                SC.update_matrix(obj.id,G) 
-            end 
+            if G.patch[G.focus.source][obj.id]==0 then G.patch[G.focus.source][obj.id]=0.5; SC.update_matrix(obj.id,G) end 
         end
         G.focus.dest=nil
       end
@@ -233,11 +236,20 @@ local function get_fader_bright(G, current_speed, btn_idx)
 end
 
 function GridNav.redraw(G, g)
+  if not GridNav.is_dirty and (util.time() % 0.1 > 0.05) then return end
+  GridNav.is_dirty = false
+
   for x=1,16 do for y=1,8 do
     local obj=G.grid_map[x][y]; local b=0
     
     if obj then
-      if obj.t=='edit' then b=((G.focus.edit_l and obj.id==1) or (G.focus.edit_r and obj.id==2)) and 15 or 4
+      if obj.t=='snap' then
+         if GridNav.snap_timers[obj.id] and GridNav.snap_timers[obj.id] > 0 then b = 15
+         elseif G.active_snapshot == obj.id then b = 10
+         elseif G.snapshots[obj.id] ~= nil then b = 6
+         else b = 2 end
+         
+      elseif obj.t=='edit' then b=((G.focus.edit_l and obj.id==1) or (G.focus.edit_r and obj.id==2)) and 15 or 4
       elseif obj.t=='seq' then
          if G.sequencers then
              local s = G.sequencers[obj.id]
@@ -258,7 +270,10 @@ function GridNav.redraw(G, g)
               b = (G.patch[obj.id][G.focus.inspect_dest] ~= 0) and 15 or 2
            else b=2 end
         elseif G.focus.source==obj.id then b=15 
-        else b=util.round(util.linlin(0,1,6,15,math.abs(G.sources_val[obj.id] or 0))) end
+        else 
+           -- FIXED: Standard behavior for Petal 1
+           b=util.round(util.linlin(0,1,6,15,math.abs(G.sources_val[obj.id] or 0))) 
+        end
       elseif obj.t=='jack' or obj.t=='p_jack' then
         if G.focus.source then 
            if G.patch[G.focus.source] and G.patch[G.focus.source][obj.id] then
@@ -301,7 +316,6 @@ function GridNav.redraw(G, g)
         
       elseif obj.t=='skip' then 
         local c=G.coco[obj.id]
-        -- CHANGED: Added OR logic for Skip LED
         if GridNav.cache[x][y] == 15 then b=15 
         elseif (c.gate_skip and c.gate_skip > 0.5) then b=10
         else b=4 end

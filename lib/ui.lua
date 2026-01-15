@@ -1,8 +1,7 @@
--- lib/ui.lua v3006
--- CHANGELOG v3006:
--- 1. VISUAL: Threshold line moved to 36px (Exact 0.5 mathematical mapping).
--- 2. VISUAL: Added extra clamping in dest inspector to prevent bleeding.
--- 3. VISUAL: Patch menu frame height extended to 50px, scope moved down to 48px.
+-- lib/ui.lua v4002
+-- CHANGELOG v4002:
+-- 1. CRITICAL FIX: Fixed param naming crash (skip_mode vs skipMode).
+-- 2. SNAPSHOTS: Updated popup naming (A-D) and duration.
 
 local Q = include('ncoco/lib/quantussy')
 local UI = {}
@@ -106,14 +105,29 @@ function UI.draw_main(G)
 end
 
 function UI.draw_dest_inspector(G, id)
+  local title = DST_NAMES[id] or "DEST"
+  local sub = ""
+  
+  -- SPECIAL UI FOR SKIP JACKS (6=Skip1, 13=Skip2)
+  if id == 6 or id == 13 then
+     local side = (id==6) and "L" or "R"
+     local mode = params:get("skip_mode"..side) -- FIX: snake_case
+     title = "SKIP "..(side=="L" and "1" or "2")..": "..(mode==1 and "SINGLE" or "AUTO")
+     sub = "K2/3: MODE"
+  end
+
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
-  screen.move(64, 20); screen.text_center(DST_NAMES[id] or "DEST")
+  screen.move(64, 20); screen.text_center(title)
+  
+  if sub ~= "" then
+     screen.level(4); screen.move(64, 10); screen.text_center(sub)
+  end
+  
   screen.level(3); screen.move(126, 10); screen.text_right("IN GAIN:"); screen.level(15)
   screen.move(126, 18); screen.text_right(string.format("%.2fx", G.dest_gains[id]))
   screen.rect(10, 30, 108, 25); screen.stroke()
   
   if id==5 or id==6 or id==7 or id==12 or id==13 or id==14 then
-     -- CHANGED: Threshold line moved from 40 to 36 (0.5 value)
      local thresh_y = 36
      screen.level(2)
      for tx=10, 118, 4 do screen.pixel(tx, thresh_y) end
@@ -129,12 +143,22 @@ function UI.draw_dest_inspector(G, id)
       if amt ~= 0 then sum = sum + (G.scope_history[src][hist_idx] * amt) end
     end
     sum = sum * G.dest_gains[id]
-    -- CHANGED: Extra clamp on final pixel Y calculation to prevent bleeding
     local py = center_y - (util.clamp(sum, -1, 1) * (h/2))
     py = util.clamp(py, 30, 54) 
     screen.pixel(10 + w - x, py); screen.fill()
   end
-  screen.level(4); screen.move(10, 62); screen.text("E3: IN GAIN")
+  
+  if id == 6 or id == 13 then
+     -- SKIP CONTROLS
+     local side = (id==6) and "L" or "R"
+     local ch = params:get("stutter_chaos"..side) -- FIX: snake_case
+     local rt = params:get("stutter_rate"..side) -- FIX: snake_case
+     screen.level(4); screen.move(2, 62); screen.text("E1:CHS"); screen.level(15); screen.text(string.format("%.2f", ch or 0))
+     screen.level(4); screen.move(60, 62); screen.text("E2:RATE"); screen.level(15); screen.text(string.format("%.3fs", rt or 0.1))
+  else
+     screen.level(4); screen.move(10, 62); screen.text("E3: IN GAIN")
+  end
+  
   UI.draw_popup(G)
 end
 
@@ -204,12 +228,10 @@ end
 function UI.draw_patch_menu(G)
   local src,dst=G.focus.source,G.focus.last_dest; if not src or not dst then return end
   local val=G.patch[src][dst] or 0; 
-  -- CHANGED: Height extended to 50px
   screen.level(0); screen.rect(10,10,108,50); screen.fill(); screen.level(15); screen.rect(10,10,108,50); screen.stroke()
   screen.move(64,25); screen.text_center("PATCHING..."); screen.move(64,35); screen.text_center(SRC_NAMES[src].." > "..DST_NAMES[dst])
   screen.move(64,40); screen.level(2); screen.line_rel(40,0); screen.move(64,40); screen.line_rel(-40,0); screen.stroke(); screen.level(15); screen.move(64,40); screen.line_rel(val*40,0); screen.stroke(); screen.circle(64+(val*40),40,2); screen.fill()
   screen.level(15); screen.move(115, 20); screen.text_right(string.format("%.0f%%",val*100))
-  -- CHANGED: Scope moved down to 48
   UI.draw_scope(G,src,30,48,68,10,math.abs(val))
   UI.draw_popup(G)
 end

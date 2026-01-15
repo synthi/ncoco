@@ -1,8 +1,7 @@
--- lib/param_set.lua v3012
--- CHANGELOG v3012:
--- 1. STUTTER: Bi-Zonal Mapping in Lua (0-50%->1-30ms, 50-100%->30-350ms).
--- 2. DRIFT: Scaled 0-1 param (0.5 = Original 0.005). High resolution.
--- 3. SKIP: Independent settings (Mode/Rate/Chaos) sending directly to Engine.
+-- lib/param_set.lua v4003
+-- CHANGELOG v4003:
+-- 1. FIX: Increased TAPE OPS group size to 7 (Recovers Clear Tape).
+-- 2. PRECISION: Loop Length L/R upgraded to Exponential (Fine tune at low values).
 
 local Params = {}
 
@@ -19,14 +18,27 @@ function Params.init(SC, G)
   params:add_control("global_chaos", "Global Chaos", controlspec.new(0, 1, "lin", 0, 0))
   params:set_action("global_chaos", function(x) for i=1,6 do params:set("p"..i.."chaos", x) end end)
   
-  -- NEW DRIFT PARAM (Scaled 0-1, centered at 0.5=0.005)
   params:add_control("tape_drift", "Tape Drift", controlspec.new(0, 1, "lin", 0.0001, 0.5))
   params:set_action("tape_drift", function(x) engine.driftAmt(x * 0.01) end)
 
-  params:add_group("TAPE OPS", 5)
+  -- FIXED: Group size 7 to include all items
+  params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
-  params:add_control("tape_len", "Loop Length", controlspec.new(0.1, 60, "lin", 0.1, 8.0, "s"))
-  params:set_action("tape_len", function(x) SC.set_loop_len(x) end)
+  
+  -- CHANGED: Exponential Loop Length for precision
+  params:add_control("tape_len_L", "Loop Length L", controlspec.new(0.01, 60, "exp", 0, 8.0, "s"))
+  params:set_action("tape_len_L", function(x) engine.loopLenL(x) end)
+  
+  params:add_control("tape_len_R", "Loop Length R", controlspec.new(0.01, 60, "exp", 0, 8.0, "s"))
+  params:set_action("tape_len_R", function(x) engine.loopLenR(x) end)
+  
+  -- Legacy param (Hidden)
+  params:add_control("tape_len", "Loop Length (Legacy)", controlspec.new(0.1, 60, "lin", 0.1, 8.0))
+  params:set_action("tape_len", function(x) 
+     params:set("tape_len_L", x)
+     params:set("tape_len_R", x)
+  end)
+  params:hide("tape_len")
   
   params:add_trigger("save_tape", "Save New Tape")
   params:set_action("save_tape", function() if params.action_write then params.action_write() end end)
@@ -51,7 +63,6 @@ function Params.init(SC, G)
     local s = (i==1) and "L" or "R"
     local num = (i==1) and "1" or "2"
     
-    -- Increased group size to 17
     params:add_group("COCO "..num, 17) 
     
     params:add_control("vol_"..string.lower(s), "Volume "..num, controlspec.new(0, 2.0, "lin", 0, 1.0))
@@ -97,7 +108,6 @@ function Params.init(SC, G)
     params:add_binary("skip"..s, "Skip "..num, "momentary", 0)
     params:set_action("skip"..s, function(x) SC.set_skip(i,x) end)
     
-    -- INDEPENDENT SKIP PARAMS (Direct Engine Commands)
     params:add_option("skip_mode"..s, "Skip Mode "..num, {"Single Jump", "Auto Repeat"}, 1)
     params:set_action("skip_mode"..s, function(x) 
       if s=="L" then engine.skipModeL(x-1) else engine.skipModeR(x-1) end
@@ -112,15 +122,12 @@ function Params.init(SC, G)
       _menu.rebuild_params()
     end)
 
-    -- Bi-Zonal Rate Control (0-1 Linear mapped to Split Curve)
     params:add_control("stutter_rate"..s, "Repeat Rate "..num, controlspec.new(0, 1, "lin", 0, 0.3))
     params:set_action("stutter_rate"..s, function(x)
        local val
        if x < 0.5 then
-          -- Zone A: Synth (1ms to 30ms) over 50% knob
           val = util.linlin(0, 0.5, 0.001, 0.030, x)
        else
-          -- Zone B: Rhythm (30ms to 350ms) over 50% knob
           val = util.linlin(0.5, 1.0, 0.030, 0.350, x)
        end
        if s=="L" then engine.stutterRateL(val) else engine.stutterRateR(val) end
@@ -131,7 +138,6 @@ function Params.init(SC, G)
        if s=="L" then engine.stutterChaosL(x) else engine.stutterChaosR(x) end
     end)
     
-    -- Hide by default
     params:hide("stutter_rate"..s)
     params:hide("stutter_chaos"..s)
     

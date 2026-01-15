@@ -1,6 +1,7 @@
--- lib/globals.lua v3005
--- CHANGELOG v3005:
--- 1. SCOPE: Increased SCOPE_LEN to 128 to fix visual cutoff on inspector.
+-- lib/globals.lua v4000
+-- CHANGELOG v4000:
+-- 1. SNAPSHOTS: Added data structures for 4 memory slots.
+-- 2. SCOPE: Scope length maintained at 128.
 
 local M = {}
 
@@ -39,6 +40,10 @@ for i=1, 4 do
   }
 end
 
+-- SNAPSHOTS SYSTEM (v4000)
+M.snapshots = {nil, nil, nil, nil} -- Stores data tables
+M.active_snapshot = 0 -- 0 = None, 1-4 = Active Slot
+
 M.fader_latched = {}
 for i=1, 16 do M.fader_latched[i] = false end
 
@@ -54,7 +59,6 @@ M.trails = { {}, {} }
 for i=1, M.TRAIL_SIZE do M.trails[1][i]=0; M.trails[2][i]=0 end
 M.trail_head = {1, 1}
 
--- CHANGED: Increased to 128 to match screen width
 M.SCOPE_LEN = 128
 M.scope_history = {}
 M.sources_val = {0,0,0,0,0,0,0,0,0,0} 
