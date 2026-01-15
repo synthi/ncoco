@@ -1,13 +1,13 @@
--- ncoco.lua v3012
+-- ncoco.lua v4003
 -- name: Ncoco
 -- desc: Hexaquantus Lo-Fi Delay & Chaos Computer.
 --       A Ciat-Lonbarde inspired instrument.
 -- tags: delay, lo-fi, chaos, feedback
 --
--- v3012 CHANGELOG:
--- 1. ROLLBACK: Removed Lua Stutter coroutines (Server-side handling).
--- 2. INIT: Added defaults for new Engine commands (Drift/Skip Mode).
--- 3. SYS: Defined local metros.
+-- v4003 CHANGELOG:
+-- 1. FIX: Corrected param IDs in snapshot capture (skip_modeL, etc).
+-- 2. FIX: Input Priority inverted (Patching overrides Inspection).
+-- 3. LOGIC: Maintained audio engine v3013 stability.
 
 engine.name = 'Ncoco'
 
@@ -27,6 +27,130 @@ local screen_metro
 
 if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
+end
+
+-- --- SNAPSHOT LOGIC ---
+
+local SNAP_NAMES = {"A", "B", "C", "D"}
+
+-- Helper: Deep Copy Table
+local function copy_table(t)
+  if type(t) ~= 'table' then return t end
+  local res = {}
+  for k, v in pairs(t) do res[copy_table(k)] = copy_table(v) end
+  return res
+end
+
+function G.snap_capture()
+  local data = {}
+  data.patch = copy_table(G.patch)
+  
+  data.petals = {}
+  for i=1, 6 do
+     data.petals[i] = {
+        freq_lfo = params:get("p"..i.."f_lfo"),
+        freq_aud = params:get("p"..i.."f_aud"),
+        chaos = params:get("p"..i.."chaos"),
+        shape = params:get("p"..i.."shape"),
+        range = params:get("p"..i.."range")
+     }
+  end
+  
+  data.transport = {
+     speedL = params:get("speedL"), speedR = params:get("speedR"),
+     recL = params:get("recL"), recR = params:get("recR"),
+     flipL = params:get("flipL"), flipR = params:get("flipR"),
+     -- FIXED: Param names must match param_set IDs (snake_case)
+     skipModeL = params:get("skip_modeL"), skipModeR = params:get("skip_modeR"),
+     rateL = params:get("stutter_rateL"), rateR = params:get("stutter_rateR"),
+     chaosL = params:get("stutter_chaosL"), chaosR = params:get("stutter_chaosR"),
+     envSlewL = params:get("envSlewL"), envSlewR = params:get("envSlewR"),
+     lenL = params:get("tape_len_L"), lenR = params:get("tape_len_R")
+  }
+  return data
+end
+
+function G.snap_apply(data)
+  if not data then return end
+  
+  if data.patch then
+     for s=1, 10 do
+        for d=1, 24 do
+           G.patch[s][d] = data.patch[s][d] or 0
+           SC.update_matrix(d, G)
+        end
+     end
+  end
+  
+  if data.petals then
+     for i=1, 6 do
+        local p = data.petals[i]
+        if p then
+           params:set("p"..i.."f_lfo", p.freq_lfo or 0.5)
+           params:set("p"..i.."f_aud", p.freq_aud or 200)
+           params:set("p"..i.."chaos", p.chaos or 0)
+           params:set("p"..i.."shape", p.shape or 1)
+           params:set("p"..i.."range", p.range or 1)
+        end
+     end
+  end
+  
+  if data.transport then
+     local t = data.transport
+     params:set("speedL", t.speedL or 1); params:set("speedR", t.speedR or 1)
+     params:set("recL", t.recL or 0); params:set("recR", t.recR or 0)
+     params:set("flipL", t.flipL or 0); params:set("flipR", t.flipR or 0)
+     -- FIXED: Apply using correct IDs
+     params:set("skip_modeL", t.skipModeL or 1); params:set("skip_modeR", t.skipModeR or 1)
+     params:set("stutter_rateL", t.rateL or 0.1); params:set("stutter_rateR", t.rateR or 0.1)
+     params:set("stutter_chaosL", t.chaosL or 0); params:set("stutter_chaosR", t.chaosR or 0)
+     params:set("envSlewL", t.envSlewL or 0.05); params:set("envSlewR", t.envSlewR or 0.05)
+     if t.lenL then params:set("tape_len_L", t.lenL) end
+     if t.lenR then params:set("tape_len_R", t.lenR) end
+  end
+  
+  G.popup.name = "SNAPSHOT LOADED"
+  G.popup.value = ""
+  G.popup.active = true; G.popup.deadline = util.time() + 2.0
+end
+
+function G.snap_save(id)
+  G.snapshots[id] = G.snap_capture()
+  G.active_snapshot = id
+  print("Snapshot "..SNAP_NAMES[id].." Saved.")
+  G.popup.name = "SNAPSHOT "..SNAP_NAMES[id]
+  G.popup.value = "SAVED"
+  G.popup.active = true; G.popup.deadline = util.time() + 2.0
+  GridNav.redraw(G, g) 
+end
+
+function G.snap_update(id)
+  G.snapshots[id] = G.snap_capture()
+  print("Snapshot "..SNAP_NAMES[id].." Updated.")
+  G.popup.name = "SNAPSHOT "..SNAP_NAMES[id]
+  G.popup.value = "UPDATED"
+  G.popup.active = true; G.popup.deadline = util.time() + 2.0
+end
+
+function G.snap_load(id)
+  if G.snapshots[id] then
+     G.snap_apply(G.snapshots[id])
+     G.active_snapshot = id
+     print("Snapshot "..SNAP_NAMES[id].." Loaded.")
+     G.popup.name = "SNAPSHOT "..SNAP_NAMES[id]
+     G.popup.value = "SELECTED"
+     G.popup.active = true; G.popup.deadline = util.time() + 2.0
+  end
+end
+
+function G.snap_clear(id)
+  G.snapshots[id] = nil
+  if G.active_snapshot == id then G.active_snapshot = 0 end
+  print("Snapshot "..SNAP_NAMES[id].." Cleared.")
+  G.popup.name = "SNAPSHOT "..SNAP_NAMES[id]
+  G.popup.value = "CLEARED"
+  G.popup.active = true; G.popup.deadline = util.time() + 2.0
+  GridNav.redraw(G, g)
 end
 
 -- --- HELPERS FOR 16n ---
@@ -188,12 +312,11 @@ function init()
     
     SC.set_rec(1, 0); SC.set_rec(2, 0)
     SC.set_feedback(1, 0.9); SC.set_feedback(2, 0.9)
-    SC.set_loop_len(8.0)
+    engine.loopLenL(8.0); engine.loopLenR(8.0)
     SC.set_bitdepth(1, 8); SC.set_bitdepth(2, 8) 
     
-    -- INIT NEW ENGINE PARAMS (Defaults)
     engine.skipModeL(0); engine.skipModeR(0)
-    engine.driftAmt(0.005) -- Default centered drift
+    engine.driftAmt(0.005)
 
     for i=1, 6 do
       local seed_lfo = 0.2 + (math.random() * 0.9)
@@ -283,7 +406,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v3012 Ready.")
+    print("Ncoco v4003 Ready.")
   end)
 end
 
@@ -296,8 +419,10 @@ function redraw()
     elseif G.focus.source <= 6 then UI.draw_petal_inspector(G, G.focus.source)
     elseif G.focus.source <= 8 then UI.draw_env_inspector(G, G.focus.source) 
     else UI.draw_yellow_inspector(G, G.focus.source) end
+  
   elseif G.focus.inspect_dest then
     UI.draw_dest_inspector(G, G.focus.inspect_dest)
+  
   elseif G.focus.edit_l then UI.draw_edit_menu(G, 1)
   elseif G.focus.edit_r then UI.draw_edit_menu(G, 2)
   else UI.draw_main(G) end
@@ -317,20 +442,33 @@ end
 function enc(n,d)
   if not G.loaded then return end
   
-  if G.focus.inspect_dest then
-    if n==3 then
-      local id = G.focus.inspect_dest
-      G.dest_gains[id] = util.clamp(G.dest_gains[id] + d/100, 0, 2)
-      SC.update_dest_gains(G)
-    end
-    return
-  end
-
+  -- FIXED: INPUT PRIORITY (If Patching, ignore Inspector logic)
   if G.focus.source and G.focus.last_dest then
     if n==3 then
       local s, dt = G.focus.source, G.focus.last_dest
       local val = util.clamp(G.patch[s][dt] + d/100, -1, 1)
       G.patch[s][dt] = val; SC.update_matrix(dt, G)
+    end
+    return
+  end
+  
+  if G.focus.inspect_dest then
+    local id = G.focus.inspect_dest
+    
+    if id == 6 or id == 13 then
+       local side = (id == 6) and "L" or "R"
+       if n == 1 then params:delta("stutter_chaos"..side, d)
+       elseif n == 2 then params:delta("stutter_rate"..side, d)
+       elseif n == 3 then 
+          G.dest_gains[id] = util.clamp(G.dest_gains[id] + d/100, 0, 2)
+          SC.update_dest_gains(G)
+       end
+       return
+    end
+    
+    if n==3 then
+      G.dest_gains[id] = util.clamp(G.dest_gains[id] + d/100, 0, 2)
+      SC.update_dest_gains(G)
     end
     return
   end
@@ -376,12 +514,24 @@ end
 function key(n,z)
   if not G.loaded then return end
   
-  -- Phase Inverter Logic
+  -- FIXED: INPUT PRIORITY (Patching Keys > Inspector Keys)
   if G.focus.source and G.focus.last_dest and z==1 then
      if n==2 or n==3 then
         local s, dt = G.focus.source, G.focus.last_dest
         G.patch[s][dt] = G.patch[s][dt] * -1
         SC.update_matrix(dt, G)
+        return
+     end
+  end
+  
+  if G.focus.inspect_dest and z==1 then
+     local id = G.focus.inspect_dest
+     if id == 6 or id == 13 then
+        local side = (id == 6) and "L" or "R"
+        if n == 2 or n == 3 then
+           local mode = params:get("skip_mode"..side)
+           params:set("skip_mode"..side, 3 - mode) 
+        end
         return
      end
   end
