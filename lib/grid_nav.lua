@@ -1,4 +1,6 @@
--- lib/grid_nav.lua v4003
+-- lib/grid_nav.lua v5000
+-- CHANGELOG v5000:
+-- 1. FIX: Removed hardcoded brightness override for Petal 1 connections to restore modulation visualization.
 -- CHANGELOG v4003:
 -- 1. VISUAL FIX: Petal 1 LED now modulates correctly (removed hardcoded override).
 
@@ -290,7 +292,10 @@ function GridNav.redraw(G, g)
           end
           local alive = math.floor(energy * 5)
           b = util.clamp(1 + alive, 1, 7)
-          if G.patch[1] and G.patch[1][obj.id] and G.patch[1][obj.id]~=0 then b=math.max(b, 8) end 
+          -- FIXED: Removed Pétalo 1 override to allow standard animation
+          if G.patch[1] and G.patch[1][obj.id] and G.patch[1][obj.id]~=0 then 
+             -- Override deleted
+          end 
         end 
       
       elseif obj.t=='rec' then 
