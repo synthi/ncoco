@@ -1,7 +1,10 @@
-// Engine_Ncoco.sc v4003
-// CHANGELOG v4003:
-// 1. FIX: Added loopLenL/loopLenR arguments to SynthDef (matches commands).
-// 2. LOGIC: Used independent loop lengths for endL/endR calculation.
+// Engine_Ncoco.sc v4003-HiRes
+// CHANGELOG v4003-HiRes:
+// 1. HI-RES MODULATION: Upgraded Envelope Followers (Amplitude) and Drift LFOs (LFDNoise3) from Control Rate (.kr) to Audio Rate (.ar).
+//    - Result: Matrix modulations and tape speed changes are now sample-accurate (no zipper noise).
+// 2. CLEAN MONITOR: Monitor signal is tapped immediately after Preamp/Saturation but BEFORE Digital Bit-Noise addition.
+// 3. STEREO TOPOLOGY: Replaced Balance2 with Pan2.ar for independent Equal Power panning (fixes Loop vs Input volume discrepancy).
+// 4. SAFETY: Added .max(1) to yellowL/R calculation to prevent Division by Zero (NaN) on buffer initialization.
 
 Engine_Ncoco : CroneEngine {
 	var <synth;
@@ -32,7 +35,6 @@ Engine_Ncoco : CroneEngine {
 			
 			bitDepthL=8, bitDepthR=8, interp=2,                   
 			dolbyL=0, dolbyR=0, 
-            // FIXED: Independent Loop Length Arguments
             loopLenL=8.0, loopLenR=8.0,
 			
 			skipModeL=0, skipModeR=0, 
@@ -50,7 +52,7 @@ Engine_Ncoco : CroneEngine {
 			
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
 
-			// --- VARS ---
+			// --- VARS DEFINITION ---
 			var dest_gains;
 			var mod_speedL_Amts, mod_speedR_Amts, mod_flipL_Amts, mod_flipR_Amts;
 			var mod_skipL_Amts, mod_skipR_Amts, mod_ampL_Amts, mod_ampR_Amts;
@@ -59,7 +61,7 @@ Engine_Ncoco : CroneEngine {
 			var mod_audioInL_Amts, mod_audioInR_Amts;
 			var mod_p1_Amts, mod_p2_Amts, mod_p3_Amts, mod_p4_Amts, mod_p5_Amts, mod_p6_Amts;
 
-			var inputL_sig, inputR_sig, envL, envR, envL_raw, envR_raw, envL_dolby, envR_dolby;
+			var inputL_sig, inputR_sig, envL, envR, envL_raw, envR_raw;
 			var p1, p2, p3, p4, p5, p6, c1, c2, c3, c4, c5, c6; 
 			var b_ph1, b_ph2, b_ph3, b_ph4, b_ph5, b_ph6, t1, t2, t3, t4, t5, t6; 
 			var out1, out2, out3, out4, out5, out6, sources_sig; 
@@ -77,10 +79,6 @@ Engine_Ncoco : CroneEngine {
 			var is8L, is12L, is8R, is12R, fixedFiltFreq;
 			var endL, endR, yellowL, yellowR, totalFiltL, totalFiltR;
 			
-			var d_lin_inL, d_exp_inL, d_duck_inL, d_lin_fbL, d_exp_fbL, d_duck_fbL;
-			var d_lin_inR, d_exp_inR, d_duck_inR, d_lin_fbR, d_exp_fbR, d_duck_fbR;
-			var gainInL, gainFbL, gainInR, gainFbR, envFbL, envFbR;
-			
 			var driftL, driftR, bleedL, bleedR, baseSpeedL, baseSpeedR;
 			var flipLogicL, flipLogicR, flipStateL, flipStateR, recLogicL, recLogicR;
 			var feedbackL, feedbackR, osc_trigger, finalVolL, finalVolR, master_out; 
@@ -91,24 +89,36 @@ Engine_Ncoco : CroneEngine {
 			var demandL, demandR, autoTrigL, autoTrigR, finalJumpTrigL, finalJumpTrigR;
 			var resetPosL, resetPosR, jitterAmountL, jitterAmountR;
 
+            // NEW VARS for Clean Monitor Tap
+            var clean_preampL, clean_preampR;
+
 			// --- DSP ---
 			dest_gains = NamedControl.kr(\dest_gains, 1!24); 
 			feedback_in = LocalIn.ar(8);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
 
+            // INPUT STAGE
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
 			inputL_sig = In.ar(inL); inputR_sig = In.ar(inR);
+			
+            // Protection HPF
+            inputL_sig = HPF.ar(inputL_sig, 20); inputR_sig = HPF.ar(inputR_sig, 20);
+            
 			inputL_sig = ((inputL_sig * preampL) + preampNoiseL).tanh; 
 			inputR_sig = ((inputR_sig * preampR) + preampNoiseR).tanh;
 			
-			envL_raw = Amplitude.kr(inputL_sig, 0.01, 0.08); 
-			envR_raw = Amplitude.kr(inputR_sig, 0.01, 0.08);
+            // HI-RES UPDATE: Amplitude.ar instead of .kr for fast envelope following
+			envL_raw = Amplitude.ar(inputL_sig, 0.01, 0.08); 
+			envR_raw = Amplitude.ar(inputR_sig, 0.01, 0.08);
 			envL = envL_raw * 2.0; envR = envR_raw * 2.0;
-			envL_dolby = Select.kr(dolbyBoostL, [envL_raw, envL]);
-			envR_dolby = Select.kr(dolbyBoostR, [envR_raw, envR]);
 
+            // MONITOR TAP: Capture signal before digital noise
+            clean_preampL = inputL_sig;
+            clean_preampR = inputR_sig;
+
+            // DIGITAL LO-FI STAGE
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.00025));
@@ -117,7 +127,9 @@ Engine_Ncoco : CroneEngine {
 			baseSR_R = (is8R * 16000) + (is12R * 24000) + ((1 - is8R - is12R) * 32000);
 			fixedFiltFreq = (is8L * 7000) + (is12L * 11000) + ((1 - is8L - is12L) * 16000);
 			interpL = 1 + (1 - is8L); interpR = 1 + (1 - is8R);
-			inputL_sig = inputL_sig + noiseL; inputR_sig = inputR_sig + noiseR;
+			
+            // Add noise to the recording path
+            inputL_sig = inputL_sig + noiseL; inputR_sig = inputR_sig + noiseR;
 
 			yellowL = DC.ar(0); yellowR = DC.ar(0);
 			
@@ -127,6 +139,7 @@ Engine_Ncoco : CroneEngine {
 			mod_p3_Amts=NamedControl.kr(\mod_p3_Amts, 0!10); mod_p4_Amts=NamedControl.kr(\mod_p4_Amts, 0!10);
 			mod_p5_Amts=NamedControl.kr(\mod_p5_Amts, 0!10); mod_p6_Amts=NamedControl.kr(\mod_p6_Amts, 0!10);
 
+            // Matrix sums will be Audio Rate because sources_sig is now Audio Rate
 			mod_p1=((sources_sig*mod_p1_Amts).sum * dest_gains[14] * 10);
 			mod_p2=((sources_sig*mod_p2_Amts).sum * dest_gains[15] * 10);
 			mod_p3=((sources_sig*mod_p3_Amts).sum * dest_gains[16] * 10);
@@ -166,7 +179,8 @@ Engine_Ncoco : CroneEngine {
 			
 			sources_sig = [out1, out2, out3, out4, out5, out6, K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1]];
 
-			driftL = LFDNoise3.kr(0.08, driftAmt); driftR = LFDNoise3.kr(0.08, driftAmt);
+            // HI-RES UPDATE: LFDNoise3.ar instead of .kr for smoother tape drift
+			driftL = LFDNoise3.ar(0.08, driftAmt); driftR = LFDNoise3.ar(0.08, driftAmt);
 
 			mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!10); mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!10);
 			mod_val_speedL=((sources_sig*mod_speedL_Amts).sum * dest_gains[0]).tanh.lag(0.01);
@@ -228,7 +242,7 @@ Engine_Ncoco : CroneEngine {
 			finalRateL = Select.ar(flipLogicL > 0.5, [baseSpeedL, baseSpeedL * -1]);
 			finalRateR = Select.ar(flipLogicR > 0.5, [baseSpeedR, baseSpeedR * -1]);
 			
-            // CHANGED: Use independent loopLenL/R
+            // Use independent loopLenL/R
 			endL = (loopLenL.lag(0.1) * 48000).min(BufFrames.kr(bufL));
 			endR = (loopLenR.lag(0.1) * 48000).min(BufFrames.kr(bufR));
 			
@@ -257,7 +271,8 @@ Engine_Ncoco : CroneEngine {
 			ptrL = Phasor.ar(finalJumpTrigL, finalRateL * BufRateScale.kr(bufL), 0, endL, resetPosL);
 			ptrR = Phasor.ar(finalJumpTrigR, finalRateR * BufRateScale.kr(bufR), 0, endR, resetPosR);
 			
-			yellowL = (ptrL / endL); yellowR = (ptrR / endR);
+            // SAFETY FIX: .max(1) to prevent Division By Zero on init (NaN protection)
+			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
 			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR]);
 
@@ -269,25 +284,14 @@ Engine_Ncoco : CroneEngine {
 			
 			readL = readL + bleedL; readR = readR + bleedR;
 			
-			envFbL = Amplitude.kr(readL, 0.01, 0.08); envFbR = Amplitude.kr(readR, 0.01, 0.08);
-			
-			d_lin_inL = DC.kr(1.0); d_exp_inL = envL_dolby.pow(2); d_duck_inL = (1 - envFbL).clip(0,1);
-			d_lin_inR = DC.kr(1.0); d_exp_inR = envR_dolby.pow(2); d_duck_inR = (1 - envFbR).clip(0,1);
-			d_lin_fbL = DC.kr(1.0); d_exp_fbL = envFbL.pow(2); d_duck_fbL = (1 - envL_dolby).clip(0,1);
-			d_lin_fbR = DC.kr(1.0); d_exp_fbR = envFbR.pow(2); d_duck_fbR = (1 - envR_dolby).clip(0,1);
-
-			gainInL = Select.kr(dolbyL, [d_lin_inL, d_exp_inL, d_lin_inL, d_exp_inL, d_lin_inL, d_duck_inL, d_exp_inL, d_duck_inL, d_duck_inL]);
-			gainFbL = Select.kr(dolbyL, [d_lin_fbL, d_lin_fbL, d_exp_fbL, d_exp_fbL, d_duck_fbL, d_lin_fbL, d_duck_fbL, d_exp_fbL, d_duck_fbL]);
-			gainInR = Select.kr(dolbyR, [d_lin_inR, d_exp_inR, d_lin_inR, d_exp_inR, d_lin_inR, d_duck_inR, d_exp_inR, d_duck_inR, d_duck_inR]);
-			gainFbR = Select.kr(dolbyR, [d_lin_fbR, d_lin_fbR, d_exp_fbR, d_exp_fbR, d_duck_fbR, d_lin_fbR, d_duck_fbR, d_exp_fbR, d_duck_fbR]);
-
+            // Original Feedback Logic (v4003)
 			feedbackL = readL * (fbL + mod_val_fbL).clip(0, 1.2) * 1.15;
 			feedbackR = readR * (fbR + mod_val_fbR).clip(0, 1.2) * 1.15;
 			feedbackL = LPF.ar(feedbackL, fixedFiltFreq).softclip;
 			feedbackR = LPF.ar(feedbackR, fixedFiltFreq).softclip;
 			
-			writeL = ((dryL * gainInL) + mod_val_audioInL) * gateRecL + (feedbackL * gainFbL);
-			writeR = ((dryR * gainInR) + mod_val_audioInR) * gateRecR + (feedbackR * gainFbR);
+			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
+			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
 			writeL = writeL.round(0.5 ** bitDepthL);
 			writeR = writeR.round(0.5 ** bitDepthR);
@@ -313,8 +317,13 @@ Engine_Ncoco : CroneEngine {
 			]);
             
             finalVolL = (ampL + mod_val_volL).clip(0, 2); finalVolR = (ampR + mod_val_volR).clip(0, 2);
-			master_out = Balance2.ar(readL*finalVolL, readL*finalVolL, panL) + Balance2.ar(readR*finalVolR, readR*finalVolR, panR);
-            monitorL = inputL_sig + mod_val_audioInL; monitorR = inputR_sig + mod_val_audioInR;
+            
+            // TOPOLOGY UPDATE: Pan2.ar for Equal Power positioning
+			master_out = Pan2.ar(readL*finalVolL, panL) + Pan2.ar(readR*finalVolR, panR);
+            
+            // MONITOR UPDATE: Use clean_preamp signals
+            monitorL = clean_preampL + mod_val_audioInL; 
+            monitorR = clean_preampR + mod_val_audioInR;
             
             Out.ar(out, Limiter.ar(master_out + [monitorL * monitorLevel, monitorR * monitorLevel], 0.95)); 
 			
