@@ -1,12 +1,11 @@
--- lib/param_set.lua v4003
--- CHANGELOG v4003:
--- 1. FIX: Increased TAPE OPS group size to 7 (Recovers Clear Tape).
--- 2. PRECISION: Loop Length L/R upgraded to Exponential (Fine tune at low values).
+-- lib/param_set.lua v9004
+-- CHANGELOG v9004:
+-- 1. NEW: Added coco1_slew and coco2_slew params (0.001 to 1.5s exponential).
 
 local Params = {}
 
 function Params.init(SC, G)
-  params:add_separator("Ncoco")
+  params:add_separator("Ncoco v9004")
   
   params:add_group("GLOBALS", 4)
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
@@ -16,23 +15,20 @@ function Params.init(SC, G)
   params:set_action("monitor_vol", function(x) SC.set_monitor_level(x) end)
   
   params:add_control("global_chaos", "Global Chaos", controlspec.new(0, 1, "lin", 0, 0))
-  params:set_action("global_chaos", function(x) for i=1,6 do params:set("p"..i.."chaos", x) end end)
+  params:set_action("global_chaos", function(x) SC.set_global_chaos(x) end)
   
   params:add_control("tape_drift", "Tape Drift", controlspec.new(0, 1, "lin", 0.0001, 0.5))
   params:set_action("tape_drift", function(x) engine.driftAmt(x * 0.01) end)
 
-  -- FIXED: Group size 7 to include all items
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
   
-  -- CHANGED: Exponential Loop Length for precision
   params:add_control("tape_len_L", "Loop Length L", controlspec.new(0.01, 60, "exp", 0, 8.0, "s"))
   params:set_action("tape_len_L", function(x) engine.loopLenL(x) end)
   
   params:add_control("tape_len_R", "Loop Length R", controlspec.new(0.01, 60, "exp", 0, 8.0, "s"))
   params:set_action("tape_len_R", function(x) engine.loopLenR(x) end)
   
-  -- Legacy param (Hidden)
   params:add_control("tape_len", "Loop Length (Legacy)", controlspec.new(0.1, 60, "lin", 0.1, 8.0))
   params:set_action("tape_len", function(x) 
      params:set("tape_len_L", x)
@@ -63,7 +59,7 @@ function Params.init(SC, G)
     local s = (i==1) and "L" or "R"
     local num = (i==1) and "1" or "2"
     
-    params:add_group("COCO "..num, 17) 
+    params:add_group("COCO "..num, 17) -- Increased size for Slew
     
     params:add_control("vol_"..string.lower(s), "Volume "..num, controlspec.new(0, 2.0, "lin", 0, 1.0))
     params:set_action("vol_"..string.lower(s), function(x) SC.set_amp(i, x) end)
@@ -94,12 +90,14 @@ function Params.init(SC, G)
        SC.set_bitdepth(i,b) 
     end)
     
-    local dolby_opts = {"Off", "Gate In", "Gate Fb", "Gate All", "Punch In", "Punch Out", "G-In/P-In", "P-Out/G-Fb", "Cross Duck"}
-    params:add_option("dolby"..s, "Dolby "..num, dolby_opts, 5) 
-    params:set_action("dolby"..s, function(x) SC.set_dolby(i, x-1) end)
+    params:add_option("coco"..num.."_out_mode", "Out Mode "..num, {"Envelope", "Audio"}, 1)
+    params:set_action("coco"..num.."_out_mode", function(x)
+       SC.set_coco_out_mode(i, x-1) 
+    end)
     
-    params:add_option("dolby_boost"..s, "Dolby "..num.." Boost", {"Normal", "High"}, 1)
-    params:set_action("dolby_boost"..s, function(x) SC.set_dolby_boost(i, x-1) end)
+    -- NEW: Coco Output Slew
+    params:add_control("coco"..num.."_slew", "Out Slew "..num, controlspec.new(0.001, 1.5, "exp", 0, 0.1))
+    params:set_action("coco"..num.."_slew", function(x) SC.set_coco_slew(i, x) end)
     
     params:add_binary("rec"..s, "Rec "..num, "toggle", 0)
     params:set_action("rec"..s, function(x) SC.set_rec(i,x) end)

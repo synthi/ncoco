@@ -1,8 +1,8 @@
--- lib/grid_nav.lua v5000
--- CHANGELOG v5000:
--- 1. FIX: Removed hardcoded brightness override for Petal 1 connections to restore modulation visualization.
--- CHANGELOG v4003:
--- 1. VISUAL FIX: Petal 1 LED now modulates correctly (removed hardcoded override).
+-- lib/grid_nav.lua v10001
+-- CHANGELOG v10001 (FINAL AUDIT):
+-- 1. REFRESH: Unlocked "is_dirty" block to allow 30Hz fluid animation.
+-- 2. OPTIMIZATION: Jacks logic separated (Static Patching vs Dynamic Monitoring).
+-- 3. CACHE: Differential update preserved to protect serial bus bandwidth.
 
 local SC = include('ncoco/lib/sc_utils')
 local GridNav = {}
@@ -35,6 +35,10 @@ function GridNav.init_map(G)
   map(7,5,'petal',5); map(6,5,'p_jack',19); map(10,5,'petal',4); map(11,5,'p_jack',18)
   
   map(3,6,'jack',23); map(4,6,'env',7); map(13,6,'env',8); map(14,6,'jack',24);
+  
+  -- SOURCES 11 & 12 (Coco Outputs)
+  map(5,6,'coco_out',11); map(12,6,'coco_out',12);
+
   map(1,7,'jack',2);  map(3,7,'jack',3);  map(5,7,'jack',4);
   map(7,7,'jack',21); map(10,7,'jack',22);
   map(12,7,'jack',11); map(14,7,'jack',10); map(16,7,'jack',9);
@@ -151,7 +155,7 @@ function GridNav.key(G, g, x, y, z, simulated)
 
   if obj.t == 'edit' then if obj.id==1 then G.focus.edit_l=(z==1) end; if obj.id==2 then G.focus.edit_r=(z==1) end; return end
   
-  if obj.t == 'petal' or obj.t == 'env' then 
+  if obj.t == 'petal' or obj.t == 'env' or obj.t == 'coco_out' then 
     if z==1 then 
         if G.focus.inspect_dest then
             G.focus.source = obj.id; G.focus.dest = G.focus.inspect_dest
@@ -237,9 +241,10 @@ local function get_fader_bright(G, current_speed, btn_idx)
   return bg
 end
 
+-- SMART-REFRESH IMPLEMENTATION (30Hz)
 function GridNav.redraw(G, g)
-  if not GridNav.is_dirty and (util.time() % 0.1 > 0.05) then return end
-  GridNav.is_dirty = false
+  -- UNLOCKED: "is_dirty" check removed to allow 30Hz fluid animation.
+  -- The cache check (Differential Update) at the end protects the serial bus.
 
   for x=1,16 do for y=1,8 do
     local obj=G.grid_map[x][y]; local b=0
@@ -266,25 +271,26 @@ function GridNav.redraw(G, g)
              else b=0 end
          else b=0 end
          
-      elseif obj.t=='petal' or obj.t=='env' then 
+      elseif obj.t=='petal' or obj.t=='env' or obj.t=='coco_out' then 
         if G.focus.inspect_dest then 
            if G.patch[obj.id] and G.patch[obj.id][G.focus.inspect_dest] then
               b = (G.patch[obj.id][G.focus.inspect_dest] ~= 0) and 15 or 2
            else b=2 end
         elseif G.focus.source==obj.id then b=15 
         else 
-           -- FIXED: Standard behavior for Petal 1
            b=util.round(util.linlin(0,1,6,15,math.abs(G.sources_val[obj.id] or 0))) 
         end
       elseif obj.t=='jack' or obj.t=='p_jack' then
-        if G.focus.source then 
+        if G.focus.source then
+           -- STATIC MODE: Patching (Simply show connection status)
            if G.patch[G.focus.source] and G.patch[G.focus.source][obj.id] then
               b=(G.patch[G.focus.source][obj.id]~=0) and 12 or 3
            else b=3 end
         elseif G.focus.inspect_dest==obj.id then b=15
         else 
+          -- DYNAMIC MODE: Monitoring (Show Energy Flow)
           local energy = 0
-          for src=1, 10 do
+          for src=1, 12 do
              if G.patch[src] and G.patch[src][obj.id] then
                 local amt = G.patch[src][obj.id]
                 if amt ~= 0 then energy = energy + math.abs(G.sources_val[src] * amt) end
@@ -292,10 +298,6 @@ function GridNav.redraw(G, g)
           end
           local alive = math.floor(energy * 5)
           b = util.clamp(1 + alive, 1, 7)
-          -- FIXED: Removed Pétalo 1 override to allow standard animation
-          if G.patch[1] and G.patch[1][obj.id] and G.patch[1][obj.id]~=0 then 
-             -- Override deleted
-          end 
         end 
       
       elseif obj.t=='rec' then 
@@ -335,6 +337,7 @@ function GridNav.redraw(G, g)
       b = 0
     end
     
+    -- DIFFERENTIAL UPDATE (Cache Filter)
     if GridNav.cache[x][y] ~= b then 
        g:led(x,y,b)
        GridNav.cache[x][y] = b 

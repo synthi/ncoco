@@ -1,7 +1,7 @@
--- lib/globals.lua v4000
--- CHANGELOG v4000:
--- 1. SNAPSHOTS: Added data structures for 4 memory slots.
--- 2. SCOPE: Scope length maintained at 128.
+-- lib/globals.lua v9000
+-- CHANGELOG v9000:
+-- 1. DATA: Increased Scope History and Sources Values arrays to 12 (to support Coco Outs).
+-- 2. MATRIX: Increased patch matrix size to 12 sources.
 
 local M = {}
 
@@ -40,9 +40,8 @@ for i=1, 4 do
   }
 end
 
--- SNAPSHOTS SYSTEM (v4000)
-M.snapshots = {nil, nil, nil, nil} -- Stores data tables
-M.active_snapshot = 0 -- 0 = None, 1-4 = Active Slot
+M.snapshots = {nil, nil, nil, nil} 
+M.active_snapshot = 0 
 
 M.fader_latched = {}
 for i=1, 16 do M.fader_latched[i] = false end
@@ -61,8 +60,9 @@ M.trail_head = {1, 1}
 
 M.SCOPE_LEN = 128
 M.scope_history = {}
-M.sources_val = {0,0,0,0,0,0,0,0,0,0} 
-for i=1, 10 do 
+-- INCREASED TO 12
+M.sources_val = {0,0,0,0,0,0,0,0,0,0,0,0} 
+for i=1, 12 do 
   M.scope_history[i] = {}
   for j=1, M.SCOPE_LEN do M.scope_history[i][j] = 0 end
 end
@@ -71,9 +71,9 @@ M.scope_head = 1
 M.petals = {} 
 for i=1, 6 do M.petals[i] = { freq=0.5, chaos=0.0 } end
 
--- EXPANDED MATRIX (24)
+-- EXPANDED MATRIX (12 Sources x 24 Dest)
 M.patch = {}
-for s=1, 10 do
+for s=1, 12 do
   M.patch[s] = {}
   for d=1, 24 do M.patch[s][d] = 0.0 end
 end

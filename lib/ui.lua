@@ -1,23 +1,21 @@
--- lib/ui.lua v4002
--- CHANGELOG v4002:
--- 1. CRITICAL FIX: Fixed param naming crash (skip_mode vs skipMode).
--- 2. SNAPSHOTS: Updated popup naming (A-D) and duration.
+-- lib/ui.lua v9004
+-- CHANGELOG v9004:
+-- 1. INSPECTOR: Added E3 Slew visualization to Coco Inspector.
 
 local Q = include('ncoco/lib/quantussy')
 local UI = {}
 
-local SRC_NAMES = {"PETAL 1","PETAL 2","PETAL 3","PETAL 4","PETAL 5","PETAL 6","ENV 1","ENV 2","YEL 1","YEL 2"}
+local SRC_NAMES = {
+  "PETAL 1","PETAL 2","PETAL 3","PETAL 4","PETAL 5","PETAL 6",
+  "ENV 1","ENV 2","YEL 1","YEL 2",
+  "COCO 1", "COCO 2"
+}
 local DST_NAMES = {
   [1]="SPD 1",[2]="AMP 1",[3]="FB 1",[4]="FILT 1",[5]="FLIP 1",[6]="SKIP 1",[7]="REC 1",
   [8]="SPD 2",[9]="AMP 2",[10]="FB 2",[11]="FILT 2",[12]="FLIP 2",[13]="SKIP 2",[14]="REC 2",
   [15]="P1 FRQ",[16]="P2 FRQ",[17]="P3 FRQ",[18]="P4 FRQ",[19]="P5 FRQ",[20]="P6 FRQ",
   [21]="VOL 1", [22]="VOL 2",
   [23]="AUD IN 1", [24]="AUD IN 2"
-}
-local DLB_NAMES = {
-  [1]="OFF", [2]="G-IN", [3]="G-FB", 
-  [4]="G-ALL", [5]="PUNCH-IN", [6]="PUNCH-OUT", 
-  [7]="GI/PI", [8]="PO/GF", [9]="X-DUCK"
 }
 local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="16bit"}
 
@@ -27,7 +25,7 @@ function UI.update_histories(G)
     local head=G.trail_head[i]; G.trails[i][head]=G.coco[i].pos or 0
     G.trail_head[i]=(head % G.TRAIL_SIZE)+1
   end
-  for i=1, 10 do
+  for i=1, 12 do
     local val = G.sources_val[i] or 0
     local hist = G.scope_history[i]
     if not G.scope_head then G.scope_head=1 end
@@ -73,8 +71,10 @@ function UI.draw_main(G)
   if G.focus.source then
     if G.focus.last_dest then UI.draw_patch_menu(G); return end
     if G.focus.source <= 6 then UI.draw_petal_inspector(G, G.focus.source)
-    elseif G.focus.source <= 8 then UI.draw_env_inspector(G, G.focus.source) 
-    else UI.draw_yellow_inspector(G, G.focus.source) end
+    elseif G.focus.source <= 8 then UI.draw_env_inspector(G, G.focus.source)
+    elseif G.focus.source <= 10 then UI.draw_yellow_inspector(G, G.focus.source)
+    else UI.draw_coco_inspector(G, G.focus.source) 
+    end
     return
   end
   
@@ -108,10 +108,9 @@ function UI.draw_dest_inspector(G, id)
   local title = DST_NAMES[id] or "DEST"
   local sub = ""
   
-  -- SPECIAL UI FOR SKIP JACKS (6=Skip1, 13=Skip2)
   if id == 6 or id == 13 then
      local side = (id==6) and "L" or "R"
-     local mode = params:get("skip_mode"..side) -- FIX: snake_case
+     local mode = params:get("skip_mode"..side)
      title = "SKIP "..(side=="L" and "1" or "2")..": "..(mode==1 and "SINGLE" or "AUTO")
      sub = "K2/3: MODE"
   end
@@ -138,7 +137,7 @@ function UI.draw_dest_inspector(G, id)
   for x=0, w-1 do
     local sum = 0
     local hist_idx = (head - 1 - x - 1) % len + 1
-    for src=1, 10 do
+    for src=1, 12 do
       local amt = G.patch[src][id]
       if amt ~= 0 then sum = sum + (G.scope_history[src][hist_idx] * amt) end
     end
@@ -149,10 +148,9 @@ function UI.draw_dest_inspector(G, id)
   end
   
   if id == 6 or id == 13 then
-     -- SKIP CONTROLS
      local side = (id==6) and "L" or "R"
-     local ch = params:get("stutter_chaos"..side) -- FIX: snake_case
-     local rt = params:get("stutter_rate"..side) -- FIX: snake_case
+     local ch = params:get("stutter_chaos"..side)
+     local rt = params:get("stutter_rate"..side)
      screen.level(4); screen.move(2, 62); screen.text("E1:CHS"); screen.level(15); screen.text(string.format("%.2f", ch or 0))
      screen.level(4); screen.move(60, 62); screen.text("E2:RATE"); screen.level(15); screen.text(string.format("%.3fs", rt or 0.1))
   else
@@ -201,6 +199,28 @@ function UI.draw_yellow_inspector(G, id)
   screen.move(64,55); screen.text_center("ADDRESS NOISE")
   UI.draw_popup(G)
 end
+
+function UI.draw_coco_inspector(G, id)
+  local side = (id==11) and "1" or "2"
+  local param_name = "coco"..side.."_out_mode"
+  local mode = params:get(param_name) 
+  local mode_str = (mode==1) and "ENVELOPE" or "AUDIO"
+  local slew = params:get("coco"..side.."_slew")
+  
+  screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
+  screen.move(5,10); screen.text(SRC_NAMES[id]); 
+  screen.move(120,10); screen.text_right(mode_str)
+  
+  screen.rect(10,20,108,25); screen.stroke(); 
+  UI.draw_scope(G,id,10,20,108,25,1); 
+  
+  screen.level(4)
+  screen.move(2,55); screen.text("K2/3: MODE")
+  -- NEW: Slew Display
+  screen.move(126,55); screen.text_right(string.format("E3:SLEW %.2f", slew))
+  UI.draw_popup(G)
+end
+
 function UI.draw_coco_radar(G, x, y, w, id)
   local c=G.coco[id]; if not c then return end; screen.level(1); screen.rect(x,y,w,8); screen.stroke()
   local trail=G.trails[id]; local head=G.trail_head[id]
@@ -209,22 +229,22 @@ function UI.draw_coco_radar(G, x, y, w, id)
   local rec = params:get("rec"..(id==1 and "L" or "R"))
   if rec==1 or (c.gate_rec and c.gate_rec>0.5) then screen.level(15); screen.rect(x+(c.pos*w),y-2,2,2); screen.fill() end
 end
+
 function UI.draw_edit_menu(G, id)
   local side = (id==1) and "L" or "R"
   local speed = params:get("speed"..side)
   local filt = params:get("filt"..side)
   local fb = params:get("fb"..side)
   local bit_idx = params:get("bits"..side)
-  local dlb_idx = params:get("dolby"..side)
   local is_link = G.focus.edit_l and G.focus.edit_r
   local title = is_link and "[ < STEREO LINK > ]" or ("COCO "..id) 
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(5,10); screen.text(title); screen.move(120,10); screen.text_right("K3: "..(BIT_NAMES[bit_idx]))
   screen.move(10,30); screen.text("E1: FILT "..string.format("%.2f",filt)); screen.move(10,45); screen.text("E2: SPD "..string.format("%.2f",speed))
   screen.move(10,60); screen.text("E3: FB "..math.floor(fb*100).."%")
-  screen.move(120,60); screen.text_right("K2: "..(DLB_NAMES[dlb_idx]))
   UI.draw_popup(G)
 end
+
 function UI.draw_patch_menu(G)
   local src,dst=G.focus.source,G.focus.last_dest; if not src or not dst then return end
   local val=G.patch[src][dst] or 0; 
