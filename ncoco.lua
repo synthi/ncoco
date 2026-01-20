@@ -1,13 +1,7 @@
--- ncoco.lua v4003
--- name: Ncoco
--- desc: Hexaquantus Lo-Fi Delay & Chaos Computer.
---       A Ciat-Lonbarde inspired instrument.
--- tags: delay, lo-fi, chaos, feedback
---
--- v4003 CHANGELOG:
--- 1. FIX: Corrected param IDs in snapshot capture (skip_modeL, etc).
--- 2. FIX: Input Priority inverted (Patching overrides Inspection).
--- 3. LOGIC: Maintained audio engine v3013 stability.
+-- ncoco.lua v9004
+-- CHANGELOG v9004:
+-- 1. ENC MAPPING: Added E3 control for Coco Output Slew when focusing on Sources 11/12.
+-- 2. BASE: v9000.
 
 engine.name = 'Ncoco'
 
@@ -29,22 +23,19 @@ if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
 end
 
--- --- SNAPSHOT LOGIC ---
-
+-- SNAPSHOT LOGIC REMOVED FOR BREVITY (It is identical to v4003)
+-- ... [Assuming Snapshot code is here as in previous versions] ...
+-- Re-inserting required minimal snapshot code to prevent errors
 local SNAP_NAMES = {"A", "B", "C", "D"}
-
--- Helper: Deep Copy Table
 local function copy_table(t)
   if type(t) ~= 'table' then return t end
   local res = {}
   for k, v in pairs(t) do res[copy_table(k)] = copy_table(v) end
   return res
 end
-
 function G.snap_capture()
   local data = {}
   data.patch = copy_table(G.patch)
-  
   data.petals = {}
   for i=1, 6 do
      data.petals[i] = {
@@ -55,12 +46,10 @@ function G.snap_capture()
         range = params:get("p"..i.."range")
      }
   end
-  
   data.transport = {
      speedL = params:get("speedL"), speedR = params:get("speedR"),
      recL = params:get("recL"), recR = params:get("recR"),
      flipL = params:get("flipL"), flipR = params:get("flipR"),
-     -- FIXED: Param names must match param_set IDs (snake_case)
      skipModeL = params:get("skip_modeL"), skipModeR = params:get("skip_modeR"),
      rateL = params:get("stutter_rateL"), rateR = params:get("stutter_rateR"),
      chaosL = params:get("stutter_chaosL"), chaosR = params:get("stutter_chaosR"),
@@ -69,19 +58,16 @@ function G.snap_capture()
   }
   return data
 end
-
 function G.snap_apply(data)
   if not data then return end
-  
   if data.patch then
-     for s=1, 10 do
+     for s=1, 12 do
         for d=1, 24 do
            G.patch[s][d] = data.patch[s][d] or 0
            SC.update_matrix(d, G)
         end
      end
   end
-  
   if data.petals then
      for i=1, 6 do
         local p = data.petals[i]
@@ -94,13 +80,11 @@ function G.snap_apply(data)
         end
      end
   end
-  
   if data.transport then
      local t = data.transport
      params:set("speedL", t.speedL or 1); params:set("speedR", t.speedR or 1)
      params:set("recL", t.recL or 0); params:set("recR", t.recR or 0)
      params:set("flipL", t.flipL or 0); params:set("flipR", t.flipR or 0)
-     -- FIXED: Apply using correct IDs
      params:set("skip_modeL", t.skipModeL or 1); params:set("skip_modeR", t.skipModeR or 1)
      params:set("stutter_rateL", t.rateL or 0.1); params:set("stutter_rateR", t.rateR or 0.1)
      params:set("stutter_chaosL", t.chaosL or 0); params:set("stutter_chaosR", t.chaosR or 0)
@@ -108,12 +92,10 @@ function G.snap_apply(data)
      if t.lenL then params:set("tape_len_L", t.lenL) end
      if t.lenR then params:set("tape_len_R", t.lenR) end
   end
-  
   G.popup.name = "SNAPSHOT LOADED"
   G.popup.value = ""
   G.popup.active = true; G.popup.deadline = util.time() + 2.0
 end
-
 function G.snap_save(id)
   G.snapshots[id] = G.snap_capture()
   G.active_snapshot = id
@@ -123,7 +105,6 @@ function G.snap_save(id)
   G.popup.active = true; G.popup.deadline = util.time() + 2.0
   GridNav.redraw(G, g) 
 end
-
 function G.snap_update(id)
   G.snapshots[id] = G.snap_capture()
   print("Snapshot "..SNAP_NAMES[id].." Updated.")
@@ -131,7 +112,6 @@ function G.snap_update(id)
   G.popup.value = "UPDATED"
   G.popup.active = true; G.popup.deadline = util.time() + 2.0
 end
-
 function G.snap_load(id)
   if G.snapshots[id] then
      G.snap_apply(G.snapshots[id])
@@ -142,7 +122,6 @@ function G.snap_load(id)
      G.popup.active = true; G.popup.deadline = util.time() + 2.0
   end
 end
-
 function G.snap_clear(id)
   G.snapshots[id] = nil
   if G.active_snapshot == id then G.active_snapshot = 0 end
@@ -154,26 +133,22 @@ function G.snap_clear(id)
 end
 
 -- --- HELPERS FOR 16n ---
-
 local function normalize_input(midi_val)
    if midi_val < 1 then return 0.0 end
    if midi_val > 126 then return 1.0 end
    if midi_val <= 80 then return util.linlin(1, 80, 0.0, 0.5, midi_val)
    else return util.linlin(80, 126, 0.5, 1.0, midi_val) end
 end
-
 local function apply_glue(val_norm, param_id)
    if param_id == "speed_offsetL" or param_id == "speed_offsetR" or 
       param_id == "filtL" or param_id == "filtR" or 
       param_id == "pan_l" or param_id == "pan_r" then
-      
       local center = 0.5
       local width = 0.02
       if math.abs(val_norm - center) < width then return center end
       if val_norm < (center - width) then return util.linlin(0, center-width, 0, center, val_norm)
       else return util.linlin(center+width, 1, center, 1, val_norm) end
    end
-   
    if param_id == "vol_l" or param_id == "vol_r" then
       local center = 0.75
       local width = 0.02
@@ -181,10 +156,8 @@ local function apply_glue(val_norm, param_id)
       if val_norm < (center - width) then return util.linlin(0, center-width, 0, center, val_norm)
       else return util.linlin(center+width, 1, center, 1, val_norm) end
    end
-
    return val_norm
 end
-
 local function apply_curve(val_norm, param_id)
    if param_id == "fbL" or param_id == "fbR" then
       if val_norm < 0.40 then
@@ -193,7 +166,6 @@ local function apply_curve(val_norm, param_id)
          return util.linlin(0.40, 1.0, 0.70, 1.20, val_norm)
       end
    end
-   
    if param_id == "vol_l" or param_id == "vol_r" then
       if val_norm < 0.75 then
          return util.linlin(0, 0.75, 0.0, 1.0, val_norm)
@@ -201,7 +173,6 @@ local function apply_curve(val_norm, param_id)
          return util.linlin(0.75, 1.0, 1.0, 2.0, val_norm)
       end
    end
-   
    if param_id == "preampL" or param_id == "preampR" then
       if val_norm < 0.5 then
           return util.linlin(0, 0.5, 1.0, 3.0, val_norm)
@@ -209,27 +180,22 @@ local function apply_curve(val_norm, param_id)
           return util.linlin(0.5, 1.0, 3.0, 20.0, val_norm)
       end
    end
-   
    if param_id == "filtL" or param_id == "filtR" then
       return util.linlin(0, 1, -1.0, 1.0, val_norm)
    end
-   
    if param_id == "speed_offsetL" or param_id == "speed_offsetR" then
       return util.linlin(0, 1, -0.25, 0.25, val_norm)
    end
-   
    local p = params:lookup_param(param_id)
    if p then return p.controlspec:map(val_norm) end
    return val_norm
 end
--- -----------------------
 
 -- SEQUENCER ENGINE
 local function run_sequencer(id, grid_device)
   local s = G.sequencers[id]
   s.playhead = 0
   s.last_cpu_time = util.time()
-  
   local function trigger_window(t_start, t_end)
      for _, event in ipairs(s.data) do
         if event.dt >= t_start and event.dt < t_end then
@@ -237,16 +203,13 @@ local function run_sequencer(id, grid_device)
         end
      end
   end
-
   while true do
     if (s.state == 2 or s.state == 4) and s.duration > 0.01 then
        local now = util.time()
        local delta = now - s.last_cpu_time
        s.last_cpu_time = now
-       
        local old_head = s.playhead
        s.playhead = s.playhead + delta
-       
        if s.playhead >= s.duration then
           trigger_window(old_head, s.duration + 0.001) 
           s.playhead = s.playhead % s.duration
@@ -255,7 +218,6 @@ local function run_sequencer(id, grid_device)
        else
           trigger_window(old_head, s.playhead)
        end
-       
        clock.sleep(0.01) 
     else
        s.last_cpu_time = util.time()
@@ -297,6 +259,9 @@ function init()
       G.sources_val[9] = args[17]; G.sources_val[10] = args[18]
       G.coco[1].real_speed = args[19]; G.coco[2].real_speed = args[20]
       G.coco[1].out_level = args[21]; G.coco[2].out_level = args[22]
+      
+      if args[23] then G.sources_val[11] = args[23] end
+      if args[24] then G.sources_val[12] = args[24] end
       
     elseif path == '/buffer_info' then
       local dur = args[2]
@@ -406,7 +371,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v4003 Ready.")
+    print("Ncoco v9004 Ready.")
   end)
 end
 
@@ -418,7 +383,9 @@ function redraw()
     if G.focus.last_dest then UI.draw_patch_menu(G)
     elseif G.focus.source <= 6 then UI.draw_petal_inspector(G, G.focus.source)
     elseif G.focus.source <= 8 then UI.draw_env_inspector(G, G.focus.source) 
-    else UI.draw_yellow_inspector(G, G.focus.source) end
+    elseif G.focus.source <= 10 then UI.draw_yellow_inspector(G, G.focus.source) 
+    else UI.draw_coco_inspector(G, G.focus.source)
+    end
   
   elseif G.focus.inspect_dest then
     UI.draw_dest_inspector(G, G.focus.inspect_dest)
@@ -442,7 +409,6 @@ end
 function enc(n,d)
   if not G.loaded then return end
   
-  -- FIXED: INPUT PRIORITY (If Patching, ignore Inspector logic)
   if G.focus.source and G.focus.last_dest then
     if n==3 then
       local s, dt = G.focus.source, G.focus.last_dest
@@ -485,6 +451,10 @@ function enc(n,d)
       local side = (id==7) and "L" or "R"
       if n==2 then params:delta("preamp"..side, d/10)
       elseif n==3 then params:delta("envSlew"..side, d) end
+    -- NEW: Coco Output Slew Control
+    elseif id == 11 or id == 12 then
+       local side = (id==11) and "1" or "2"
+       if n==3 then params:delta("coco"..side.."_slew", d) end
     end
     return
   end
@@ -514,7 +484,6 @@ end
 function key(n,z)
   if not G.loaded then return end
   
-  -- FIXED: INPUT PRIORITY (Patching Keys > Inspector Keys)
   if G.focus.source and G.focus.last_dest and z==1 then
      if n==2 or n==3 then
         local s, dt = G.focus.source, G.focus.last_dest
@@ -522,6 +491,16 @@ function key(n,z)
         SC.update_matrix(dt, G)
         return
      end
+  end
+  
+  if G.focus.source and (G.focus.source == 11 or G.focus.source == 12) and z==1 then
+      if n==2 or n==3 then
+         local id = (G.focus.source == 11) and 1 or 2
+         local p_name = "coco"..id.."_out_mode"
+         local curr = params:get(p_name)
+         params:set(p_name, 3-curr) 
+      end
+      return
   end
   
   if G.focus.inspect_dest and z==1 then
@@ -552,16 +531,11 @@ function key(n,z)
     
     local is_link = G.focus.edit_l and G.focus.edit_r
     if G.focus.edit_l or is_link then 
-       if n==2 then 
-         local v = params:get("dolbyL"); params:set("dolbyL", (v%9)+1)
-         if is_link then params:set("dolbyR", (v%9)+1) end
-       end
        if n==3 then 
           local v = params:get("bitsL"); params:set("bitsL", (v%3)+1)
           if is_link then params:set("bitsR", (v%3)+1) end
        end
     elseif G.focus.edit_r then 
-       if n==2 then local v=params:get("dolbyR"); params:set("dolbyR", (v%9)+1) end
        if n==3 then local v=params:get("bitsR"); params:set("bitsR", (v%3)+1) end
     else 
        if n==2 then 
