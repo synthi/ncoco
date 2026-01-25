@@ -1,9 +1,16 @@
-// Engine_Ncoco.sc v10002
-// CHANGELOG v10002 (BUGFIX - COCO SLEW):
-// 1. FIX: Disconnected "cocoSlew" parameter wired correctly.
-//    - Previously, Coco Envelopes were accidentally sharing the Input Slew physics.
-//    - Now, Coco Envelopes have their own independent Linked-Ratio physics derived from cocoSlewL/R.
-// 2. LOGIC: Attack/Release math replicated for Coco path (Attack = 10% of Release).
+// Engine_Ncoco.sc v10012
+// CHANGELOG v10012 (HI-FI ARCHITECTURE FIX & TUNING):
+// 1. MODE 16-BIT (STRUCTURAL FIX):
+//    - LATCH BYPASS: Writing is now direct (Select.ar) to prevent Ring Mod/Aliasing.
+//    - Noise Floor: -76dB (0.00016) for anti-denormal bias.
+//    - Bleed: 0.0.
+//    - SR Var: 39.000 Hz.
+// 2. MODE 12-BIT (TUNING):
+//    - Noise Floor: -56dB (0.0016).
+//    - Bleed: -60dB (0.001).
+//    - Filter: 12.800 Hz.
+// 3. MODE 8-BIT:
+//    - Unchanged.
 
 Engine_Ncoco : CroneEngine {
 	var <synth;
@@ -140,14 +147,22 @@ Engine_Ncoco : CroneEngine {
             // DIGITAL NOISE GENERATION
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
-			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.00025));
-			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.00025));
 			
-			baseSR_L = (is8L * 16000) + (is12L * 24000) + ((1 - is8L - is12L) * 32000);
-			baseSR_R = ((is8R * 16000) + (is12R * 24000) + ((1 - is8R - is12R) * 32000)) * 1.002;
-			fixedFiltFreqL = (is8L * 7000) + (is12L * 11000) + ((1 - is8L - is12L) * 16000);
+            // Noise: 8b=0.008 (-42dB), 12b=0.0016 (-56dB), 16b=0.00016 (-76dB)
+			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.0016) + ((1 - is8L - is12L) * 0.00016));
+			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.0016) + ((1 - is8R - is12R) * 0.00016));
+			
+            // SR: 8b=16k, 12b=31.25k, 16b=39k
+			baseSR_L = (is8L * 16000) + (is12L * 31250) + ((1 - is8L - is12L) * 39000);
+			baseSR_R = ((is8R * 16000) + (is12R * 31250) + ((1 - is8R - is12R) * 39000)) * 1.002;
+			
+            // Filt: 8b=7k, 12b=12.8k, 16b=18k
+            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + ((1 - is8L - is12L) * 18000);
             fixedFiltFreqR = fixedFiltFreqL * 1.04;
-			interpL = 1 + (1 - is8L); interpR = 1 + (1 - is8R);
+			
+            // Interp: 8b=1(Lin), 12b=1(Lin), 16b=2(Cub)
+            interpL = 1 + (1 - is8L - is12L); 
+            interpR = 1 + (1 - is8R - is12R);
 			
             // NOISE SPLIT: 50% at Input
             inputL_sig = inputL_sig + (noiseL * 0.5); 
@@ -259,8 +274,9 @@ Engine_Ncoco : CroneEngine {
 			// Anti-NaN Safety
 			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
-			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * 0.0025;
-			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * 0.0025;
+            // Bleed Logic: 8b=0.0025, 12b=0.001, 16b=0.0
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * ((is8L * 0.0025) + (is12L * 0.001));
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * ((is8R * 0.0025) + (is12R * 0.001));
 
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
@@ -336,11 +352,14 @@ Engine_Ncoco : CroneEngine {
 			writeL = writeL.round(0.5 ** bitDepthL);
 			writeR = writeR.round(0.5 ** bitDepthR);
 			
-			jitterAmountL = (is8L * 0.02) + (is12L * 0.01) + ((1 - is8L - is12L) * 0.005);
-			jitterAmountR = (is8R * 0.02) + (is12R * 0.01) + ((1 - is8R - is12R) * 0.005);
+            // Jitter: 8b=0.02, 12b=0.004, 16b=0.001
+			jitterAmountL = (is8L * 0.02) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.001);
+			jitterAmountR = (is8R * 0.02) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.001);
 			
-			writeL = Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountL))));
-			writeR = Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountR))));
+            // LATCH BYPASS FOR 16-BIT (Fixes RingMod/Aliasing)
+            // If 8/12 bit: Use Latch. If 16 bit: Bypass Latch (Write Raw).
+			writeL = Select.ar(is8L + is12L, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountL))))]);
+			writeR = Select.ar(is8R + is12R, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountR))))]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 			
