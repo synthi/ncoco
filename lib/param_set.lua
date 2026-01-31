@@ -1,4 +1,4 @@
--- lib/param_set.lua v9007
+-- lib/param_set.lua v10018
 -- CHANGELOG v9005:
 -- 1. NEW: Added 'bleed_routing' (Pre/Post Filter) option.
 -- fix load file message in sc
@@ -6,7 +6,7 @@
 local Params = {}
 
 function Params.init(SC, G)
-  params:add_separator("Ncoco v9005")
+  params:add_separator("Ncoco")
   
   params:add_group("GLOBALS", 5) -- Increased count
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
