@@ -1,14 +1,14 @@
-// Engine_Ncoco.sc v10016
-// CHANGELOG v10016 (VISUALS FIX):
-// 1. OSC FIX: Changed OSCFunc srcID to 'nil' (promiscuous). 
-//    - Fixes "missing visuals" on Shield due to strict address filtering.
-// 2. INIT: Explicitly passing ampL/ampR in Synth.new to ensure valid initial state.
-// 3. CORE: Maintained Split Architecture (Stable on Shield).
+// Engine_Ncoco.sc v10017
+// CHANGELOG v10017 (BLEED ROUTING):
+// 1. ARCHITECTURE: Added 'b_bleed' audio bus to transport Clock Noise separately from Core to Out.
+// 2. LOGIC: Added 'bleedPost' parameter in NcocoOut.
+//    - 0 (Pre): Bleed is mixed before the DJ Filter (gets dark).
+//    - 1 (Post): Bleed is mixed after the DJ Filter (stays bright/digital).
 
 Engine_Ncoco : CroneEngine {
 	var <synth_core, <synth_out;
 	var <bufL, <bufR;
-	var <b_tape, <b_mon, <b_mod_vol, <b_mod_filt; // Internal buses
+	var <b_tape, <b_mon, <b_bleed, <b_mod_vol, <b_mod_filt; // Added b_bleed
 	var <osc_responder; 
 	var <norns_addr;
 
@@ -22,10 +22,11 @@ Engine_Ncoco : CroneEngine {
 		bufR = Buffer.alloc(context.server, 48000 * 60, 1);
 		
 		// Internal Interconnects
-		b_tape = Bus.audio(context.server, 2);      // Tape signal -> Output
-		b_mon = Bus.audio(context.server, 2);       // Dry/Monitor signal -> Output
-		b_mod_vol = Bus.control(context.server, 2); // Modulation CV -> Output Amp
-		b_mod_filt = Bus.control(context.server, 2);// Modulation CV -> Output Filter
+		b_tape = Bus.audio(context.server, 2);      // Tape signal (Clean)
+		b_mon = Bus.audio(context.server, 2);       // Monitor signal
+		b_bleed = Bus.audio(context.server, 2);     // [NEW] Bleed signal isolated
+		b_mod_vol = Bus.control(context.server, 2); 
+		b_mod_filt = Bus.control(context.server, 2);
 		
 		norns_addr = NetAddr("127.0.0.1", 10111);
 		
@@ -35,11 +36,12 @@ Engine_Ncoco : CroneEngine {
 		context.server.sync;
 
 		// -----------------------------------------------------------
-		// SYNTH 1: CORE (Physics, Tape, Feedback, Matrix, Write)
+		// SYNTH 1: CORE
 		// -----------------------------------------------------------
 		SynthDef(\NcocoCore, {
 			arg bufL, bufR, inL, inR,
-			bus_tape_out, bus_mon_out, bus_mvol_out, bus_mfilt_out,
+			bus_tape_out, bus_mon_out, bus_bleed_out, // Added bleed out
+			bus_mvol_out, bus_mfilt_out,
 			
 			recL=0, recR=0, fbL=0.85, fbR=0.85, speedL=1.0, speedR=1.0,     
 			flipL=0, flipR=0, skipL=0, skipR=0,           
@@ -54,8 +56,6 @@ Engine_Ncoco : CroneEngine {
 			driftAmt=0.005,
 			
 			preampL=1.0, preampR=1.0, envSlewL=0.05, envSlewR=0.05,
-            
-            // Added ampL/R here for Visuals calculation
             ampL=1.0, ampR=1.0,
 			
 			p1f=0.5, p2f=0.6, p3f=0.7, p4f=0.8, p5f=0.9, p6f=1.0,
@@ -159,17 +159,13 @@ Engine_Ncoco : CroneEngine {
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			
-            // v10012 Noise Logic
 			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.0016) + ((1 - is8L - is12L) * 0.00016));
 			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.0016) + ((1 - is8R - is12R) * 0.00016));
 			
-            // v10012 SR Logic
 			baseSR_L = (is8L * 16000) + (is12L * 31250) + ((1 - is8L - is12L) * 39000);
 			baseSR_R = ((is8R * 16000) + (is12R * 31250) + ((1 - is8R - is12R) * 39000)) * 1.002;
-            // v10012 Filter Logic
             fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + ((1 - is8L - is12L) * 18000);
             fixedFiltFreqR = fixedFiltFreqL * 1.04;
-            // v10012 Interp Logic
             interpL = 1 + (1 - is8L - is12L); 
             interpR = 1 + (1 - is8R - is12R);
 			
@@ -255,8 +251,8 @@ Engine_Ncoco : CroneEngine {
 			
 			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
-            // v10012 Bleed Logic
-            bleedAmpL = (is8L * 0.0025) + (is12L * 0.001); // 16b is 0
+            // Bleed Logic
+            bleedAmpL = (is8L * 0.0025) + (is12L * 0.001); 
             bleedAmpR = (is8R * 0.0025) + (is12R * 0.001);
 			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmpL;
 			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmpR;
@@ -264,8 +260,10 @@ Engine_Ncoco : CroneEngine {
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
 			
-			readL = readL + bleedL + (noiseL * 0.5); 
-            readR = readR + bleedR + (noiseR * 0.5);
+            // [FIX] Bleed is NOT mixed here anymore. It's sent to Out via b_bleed.
+            // readL = readL + bleedL + (noiseL * 0.5); // OLD
+            readL = readL + (noiseL * 0.5); // NEW: Only noise here
+            readR = readR + (noiseR * 0.5);
 
             // Coco Env Logic
             relCoL = cocoSlewL.linexp(0, 1, 0.05, 2.5); relCoR = cocoSlewR.linexp(0, 1, 0.05, 2.5);
@@ -312,25 +310,22 @@ Engine_Ncoco : CroneEngine {
 			writeL = writeL.round(0.5 ** bitDepthL);
 			writeR = writeR.round(0.5 ** bitDepthR);
 			
-            // v10012 Jitter
 			jitterAmountL = (is8L * 0.02) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.001);
 			jitterAmountR = (is8R * 0.02) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.001);
 			
-            // v10012 LATCH BYPASS for 16-bit
 			writeL = Select.ar(is8L + is12L, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountL))))]);
 			writeR = Select.ar(is8R + is12R, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountR))))]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-            // SEND INFO TO VISUALIZER (LocalOut/SendReply is in Core)
 			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
 			osc_trigger = Impulse.kr(30);
-            // [FIX v10016] SendReply with promiscuous OSCFunc in alloc
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
             // BRIDGE: OUTPUT TO BUSES
             Out.ar(bus_tape_out, [readL, readR]);
             Out.ar(bus_mon_out, [clean_preampL + mod_val_audioInL, clean_preampR + mod_val_audioInR]);
+            Out.ar(bus_bleed_out, [bleedL, bleedR]); // [NEW] Send Bleed separately
             Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]);
             Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]);
 
@@ -340,17 +335,20 @@ Engine_Ncoco : CroneEngine {
 		// SYNTH 2: OUT (Mix, Filter, Amp)
 		// -----------------------------------------------------------
 		SynthDef(\NcocoOut, {
-            arg out, bus_tape_in, bus_mon_in, bus_mvol_in, bus_mfilt_in,
-            filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0;
+            arg out, bus_tape_in, bus_mon_in, bus_bleed_in, // Added bleed in
+            bus_mvol_in, bus_mfilt_in,
+            filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
+            bleedPost=0; // [NEW] Param
 
             // --- VARS (ALL DECLARED AT TOP) ---
-            var readL, readR, monL, monR;
+            var readL, readR, monL, monR, bleedL, bleedR;
             var mod_vol, mod_filt;
             var mod_val_volL, mod_val_volR, mod_val_filtL, mod_val_filtR;
             var totalFiltL, totalFiltR;
             var finalVolL, finalVolR;
             var master_out;
-            var tape_in, mon_in;
+            var tape_in, mon_in, bleed_in;
+            var sigL, sigR;
 
             // --- CODE BODY ---
             tape_in = In.ar(bus_tape_in, 2);
@@ -358,6 +356,9 @@ Engine_Ncoco : CroneEngine {
             
             mon_in = In.ar(bus_mon_in, 2);
             monL = mon_in[0]; monR = mon_in[1];
+            
+            bleed_in = In.ar(bus_bleed_in, 2);
+            bleedL = bleed_in[0]; bleedR = bleed_in[1];
 
             mod_vol = In.kr(bus_mvol_in, 2);
             mod_val_volL = mod_vol[0]; mod_val_volR = mod_vol[1];
@@ -368,19 +369,28 @@ Engine_Ncoco : CroneEngine {
 			totalFiltL = (filtL + mod_val_filtL).clip(-1, 1);
 			totalFiltR = (filtR + mod_val_filtR).clip(-1, 1);
 
-			readL = Select.ar(totalFiltL.abs < 0.05, [
-				HPF.ar(LPF.ar(readL, (totalFiltL.min(0)+1).linexp(0,1,100,20000)), totalFiltL.max(0).linexp(0,1,20,15000)),
-				readL
+            // [NEW] Bleed Routing Logic
+            // Pre-Filter Mix
+            sigL = readL + (bleedL * (1.0 - bleedPost));
+            sigR = readR + (bleedR * (1.0 - bleedPost));
+
+			sigL = Select.ar(totalFiltL.abs < 0.05, [
+				HPF.ar(LPF.ar(sigL, (totalFiltL.min(0)+1).linexp(0,1,100,20000)), totalFiltL.max(0).linexp(0,1,20,15000)),
+				sigL
 			]);
-			readR = Select.ar(totalFiltR.abs < 0.05, [
-				HPF.ar(LPF.ar(readR, (totalFiltR.min(0)+1).linexp(0,1,100,20000)), totalFiltR.max(0).linexp(0,1,20,15000)),
-				readR
+			sigR = Select.ar(totalFiltR.abs < 0.05, [
+				HPF.ar(LPF.ar(sigR, (totalFiltR.min(0)+1).linexp(0,1,100,20000)), totalFiltR.max(0).linexp(0,1,20,15000)),
+				sigR
 			]);
+            
+            // Post-Filter Mix
+            sigL = sigL + (bleedL * bleedPost);
+            sigR = sigR + (bleedR * bleedPost);
             
             finalVolL = (ampL + mod_val_volL).clip(0, 2); 
             finalVolR = (ampR + mod_val_volR).clip(0, 2);
             
-			master_out = Pan2.ar(readL*finalVolL, panL) + Pan2.ar(readR*finalVolR, panR);
+			master_out = Pan2.ar(sigL*finalVolL, panL) + Pan2.ar(sigR*finalVolR, panR);
             
             Out.ar(out, Limiter.ar(master_out + [monL * monitorLevel, monR * monitorLevel], 0.95)); 
         }).add;
@@ -392,15 +402,17 @@ Engine_Ncoco : CroneEngine {
 		synth_core = Synth.new(\NcocoCore, [
             \bufL, bufL, \bufR, bufR, \inL, context.in_b[0].index, \inR, context.in_b[1].index,
             \bus_tape_out, b_tape.index, \bus_mon_out, b_mon.index,
+            \bus_bleed_out, b_bleed.index, // [NEW]
             \bus_mvol_out, b_mod_vol.index, \bus_mfilt_out, b_mod_filt.index,
-            \ampL, 1.0, \ampR, 1.0 // [FIX v10016] Explicit init
+            \ampL, 1.0, \ampR, 1.0 
         ], context.xg, \addToHead);
         
         synth_out = Synth.new(\NcocoOut, [
             \out, context.out_b.index,
             \bus_tape_in, b_tape.index, \bus_mon_in, b_mon.index,
+            \bus_bleed_in, b_bleed.index, // [NEW]
             \bus_mvol_in, b_mod_vol.index, \bus_mfilt_in, b_mod_filt.index
-        ], context.xg, \addToTail); // Out comes after Core
+        ], context.xg, \addToTail);
 
         // [FIX v10016] OSCFunc Promiscuous Mode (nil srcID)
 		osc_responder = OSCFunc({ |msg| NetAddr("127.0.0.1", 10111).sendMsg("/update", *msg.drop(3)); }, '/update', nil).fix;
@@ -485,10 +497,13 @@ Engine_Ncoco : CroneEngine {
         // PARAMS -> OUT
 		this.addCommand("filtL", "f", { |msg| synth_out.set(\filtL, msg[1]) });
 		this.addCommand("filtR", "f", { |msg| synth_out.set(\filtR, msg[1]) });
+		this.addCommand("ampL", "f", { |msg| synth_out.set(\ampL, msg[1]) });
+		this.addCommand("ampR", "f", { |msg| synth_out.set(\ampR, msg[1]) });
 		this.addCommand("panL", "f", { |msg| synth_out.set(\panL, msg[1]) });
 		this.addCommand("panR", "f", { |msg| synth_out.set(\panR, msg[1]) });
 		this.addCommand("monitorLevel", "f", { |msg| synth_out.set(\monitorLevel, msg[1]) });
-        
+        this.addCommand("bleedPost", "f", { |msg| synth_out.set(\bleedPost, msg[1]) }); // [NEW]
+
         // PARAMS -> BOTH (Amp controls visual in Core and audio in Out)
         this.addCommand("ampL", "f", { |msg| 
             synth_core.set(\ampL, msg[1]); 
@@ -532,5 +547,6 @@ Engine_Ncoco : CroneEngine {
         synth_out.free; 
         bufL.free; bufR.free; 
         b_tape.free; b_mon.free; b_mod_vol.free; b_mod_filt.free; 
+        b_bleed.free; // [NEW]
     }
 }
