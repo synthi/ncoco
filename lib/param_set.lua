@@ -1,7 +1,8 @@
--- lib/param_set.lua v10018
+-- lib/param_set.lua v10019
 -- CHANGELOG v9005:
 -- 1. NEW: Added 'bleed_routing' (Pre/Post Filter) option.
 -- fix load file message in sc
+-- tweaked defaults
 
 local Params = {}
 
@@ -12,13 +13,13 @@ function Params.init(SC, G)
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
-  params:add_control("monitor_vol", "Monitor Level", controlspec.new(0, 1.2, "lin", 0, 0.0))
+  params:add_control("monitor_vol", "Monitor Level", controlspec.new(0, 1.2, "lin", 0, 1.0))
   params:set_action("monitor_vol", function(x) SC.set_monitor_level(x) end)
   
-  params:add_control("global_chaos", "Global Chaos", controlspec.new(0, 1, "lin", 0, 0))
+  params:add_control("global_chaos", "Global Chaos", controlspec.new(0, 1, "lin", 0, 0.11))
   params:set_action("global_chaos", function(x) SC.set_global_chaos(x) end)
   
-  params:add_control("tape_drift", "Tape Drift", controlspec.new(0, 1, "lin", 0.0001, 0.5))
+  params:add_control("tape_drift", "Tape Drift", controlspec.new(0, 1, "lin", 0.0001, 0.42))
   params:set_action("tape_drift", function(x) engine.driftAmt(x * 0.01) end)
 
   -- [NEW] Bleed Routing
@@ -114,7 +115,10 @@ function Params.init(SC, G)
     params:add_binary("skip"..s, "Skip "..num, "momentary", 0)
     params:set_action("skip"..s, function(x) SC.set_skip(i,x) end)
     
-    params:add_option("skip_mode"..s, "Skip Mode "..num, {"Single Jump", "Auto Repeat"}, 1)
+    -- params:add_option("skip_mode"..s, "Skip Mode "..num, {"Single Jump", "Auto Repeat"}, 1)
+    local default_skip = (i == 1) and 2 or 1 
+    
+    params:add_option("skip_mode"..s, "Skip Mode "..num, {"Single Jump", "Auto Repeat"}, default_skip)
     params:set_action("skip_mode"..s, function(x) 
       if s=="L" then engine.skipModeL(x-1) else engine.skipModeR(x-1) end
       
@@ -128,7 +132,7 @@ function Params.init(SC, G)
       _menu.rebuild_params()
     end)
 
-    params:add_control("stutter_rate"..s, "Repeat Rate "..num, controlspec.new(0, 1, "lin", 0, 0.3))
+    params:add_control("stutter_rate"..s, "Repeat Rate "..num, controlspec.new(0, 1, "lin", 0, 0.5))
     params:set_action("stutter_rate"..s, function(x)
        local val
        if x < 0.5 then
@@ -174,13 +178,13 @@ function Params.init(SC, G)
       if params:get("p"..i.."range") == 1 then SC.set_petal_freq(i,x) end 
     end)
     
-    params:add_control("p"..i.."f_aud", "Freq (Aud)", controlspec.new(20, 2000, "exp", 0, 200))
+    params:add_control("p"..i.."f_aud", "Freq (Aud)", controlspec.new(20, 2000, "exp", 0, 111))
     params:set_action("p"..i.."f_aud", function(x) 
       if params:get("p"..i.."range") == 2 then SC.set_petal_freq(i,x) end 
     end)
     params:hide("p"..i.."f_aud") 
 
-    params:add_control("p"..i.."chaos", "Chaos", controlspec.new(0, 1, "lin", 0, 0))
+    params:add_control("p"..i.."chaos", "Chaos", controlspec.new(0, 1, "lin", 0, 0.11))
     params:set_action("p"..i.."chaos", function(x) SC.set_petal_chaos(i,x) end)
     
     params:add_option("p"..i.."shape", "Shape", {"Tri", "Castle"}, 1)
