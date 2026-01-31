@@ -1,13 +1,13 @@
--- lib/param_set.lua v9004
--- CHANGELOG v9004:
--- 1. NEW: Added coco1_slew and coco2_slew params (0.001 to 1.5s exponential).
+-- lib/param_set.lua v9005
+-- CHANGELOG v9005:
+-- 1. NEW: Added 'bleed_routing' (Pre/Post Filter) option.
 
 local Params = {}
 
 function Params.init(SC, G)
-  params:add_separator("Ncoco v9004")
+  params:add_separator("Ncoco v9005")
   
-  params:add_group("GLOBALS", 4)
+  params:add_group("GLOBALS", 5) -- Increased count
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
@@ -19,6 +19,10 @@ function Params.init(SC, G)
   
   params:add_control("tape_drift", "Tape Drift", controlspec.new(0, 1, "lin", 0.0001, 0.5))
   params:set_action("tape_drift", function(x) engine.driftAmt(x * 0.01) end)
+
+  -- [NEW] Bleed Routing
+  params:add_option("bleed_routing", "Bleed Routing", {"Pre-Filter", "Post-Filter"}, 1)
+  params:set_action("bleed_routing", function(x) engine.bleedPost(x-1) end)
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
@@ -59,7 +63,7 @@ function Params.init(SC, G)
     local s = (i==1) and "L" or "R"
     local num = (i==1) and "1" or "2"
     
-    params:add_group("COCO "..num, 17) -- Increased size for Slew
+    params:add_group("COCO "..num, 17) 
     
     params:add_control("vol_"..string.lower(s), "Volume "..num, controlspec.new(0, 2.0, "lin", 0, 1.0))
     params:set_action("vol_"..string.lower(s), function(x) SC.set_amp(i, x) end)
@@ -95,7 +99,6 @@ function Params.init(SC, G)
        SC.set_coco_out_mode(i, x-1) 
     end)
     
-    -- NEW: Coco Output Slew
     params:add_control("coco"..num.."_slew", "Out Slew "..num, controlspec.new(0.001, 1.5, "exp", 0, 0.1))
     params:set_action("coco"..num.."_slew", function(x) SC.set_coco_slew(i, x) end)
     
