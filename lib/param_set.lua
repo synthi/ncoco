@@ -1,6 +1,7 @@
--- lib/param_set.lua v9005
+-- lib/param_set.lua v9007
 -- CHANGELOG v9005:
 -- 1. NEW: Added 'bleed_routing' (Pre/Post Filter) option.
+-- fix load file message in sc
 
 local Params = {}
 
@@ -44,10 +45,14 @@ function Params.init(SC, G)
   params:set_action("save_tape", function() if params.action_write then params.action_write() end end)
   
   params:add{type="file", id="load_tape", name="Load Tape", path=_path.audio, action=function(path) 
-    if path and path ~= "cancel" and path ~= "" then
-       local t = params:get("tape_target")
-       if t==1 or t==3 then engine.read_tape(1, path) end 
-       if t==2 or t==3 then engine.read_tape(2, path) end 
+    -- [FIX] Security check: Ignore folders and non-audio files
+    if path and path ~= "cancel" and path ~= "" and string.sub(path, -1) ~= "/" then
+       -- Check extension
+       if string.find(string.lower(path), "%.wav") or string.find(string.lower(path), "%.aif") then
+           local t = params:get("tape_target")
+           if t==1 or t==3 then engine.read_tape(1, path) end 
+           if t==2 or t==3 then engine.read_tape(2, path) end 
+       end
     end
   end}
   
