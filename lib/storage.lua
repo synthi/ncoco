@@ -1,7 +1,8 @@
--- lib/storage.lua v4000
--- CHANGELOG v4000:
+-- lib/storage.lua v9005
+-- CHANGELOG v9005:
 -- 1. TOTAL RECALL: Added snapshot data & state persistence.
 -- 2. CASCADE LOAD: Implemented staggered loading (Clock Run) to avoid CPU spikes.
+-- 3. fix sequencer state on load
 
 local Storage = {}
 
@@ -78,13 +79,18 @@ function Storage.load(G, SC, pset_number)
       -- Load Snapshots to Memory
       if data.snapshots then G.snapshots = data.snapshots end
       G.active_snapshot = data.active_snapshot or 0
-      
       -- Load Sequencer Data (But don't start yet)
       if data.sequencers then
          G.sequencers = data.sequencers
          for i=1,4 do 
             G.sequencers[i].double_click_timer = nil 
-            G.sequencers[i].state = 3 -- Default to Stopped
+            
+            -- CORRECCIÓN: Solo poner estado 3 si hay datos grabados
+            if G.sequencers[i].data and #G.sequencers[i].data > 0 then
+                G.sequencers[i].state = 3 -- Stopped (Ready)
+            else
+                G.sequencers[i].state = 0 -- Empty
+            end
          end
       end
       
