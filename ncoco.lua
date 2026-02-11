@@ -1,6 +1,6 @@
--- ncoco.lua v9004
--- CHANGELOG v9004:
--- 1. ENC MAPPING: Added E3 control for Coco Output Slew when focusing on Sources 11/12.
+-- ncoco.lua v9005
+-- CHANGELOG v9005:
+-- 1. ENC MAPPING: Added E3 control for Coco Output Slew when focusing on Sources 11/12. load last pset
 -- 2. BASE: v9000.
 
 engine.name = 'Ncoco'
