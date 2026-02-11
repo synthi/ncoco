@@ -290,6 +290,9 @@ function init()
       params:set("p"..i.."f_aud", seed_aud)
       SC.set_petal_freq(i, seed_lfo)
     end
+
+     -- carga last pset
+      params:default()
     
     for i=1, 4 do clock.run(function() run_sequencer(i, g) end) end
 
