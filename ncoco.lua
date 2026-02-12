@@ -1,6 +1,9 @@
--- ncoco.lua v9005
--- CHANGELOG v9005:
--- 1. ENC MAPPING: Added E3 control for Coco Output Slew when focusing on Sources 11/12. load last pset
+-- ncoco.lua v9006
+-- CHANGELOG v9006:
+-- 1. SYSTEM: Added Grid auto-refresh and cache reset to fix frozen LEDs.
+-- 2. PRESET: Fixed params:default() placement for correct loading.
+-- CHANGELOG v9004:
+-- 1. ENC MAPPING: Added E3 control for Coco Output Slew when focusing on Sources 11/12.
 -- 2. BASE: v9000.
 
 engine.name = 'Ncoco'
@@ -290,15 +293,21 @@ function init()
       params:set("p"..i.."f_aud", seed_aud)
       SC.set_petal_freq(i, seed_lfo)
     end
-
-     -- carga last pset
-      params:default()
+    
+    -- [FIX] Load last saved preset (overwriting random init values)
+    params:default()
     
     for i=1, 4 do clock.run(function() run_sequencer(i, g) end) end
 
     grid_metro = metro.init(); grid_metro.time = 1/15
     grid_metro.event = function() pcall(GridNav.redraw, G, g) end
     grid_metro:start()
+    
+    -- [FIX] Grid Auto-Heal callback
+    grid.add = function()
+       print("Grid Reconnected - Resetting Cache")
+       GridNav.reset_cache()
+    end
 
     screen_metro = metro.init(); screen_metro.time = 1/30
     screen_metro.event = function() redraw() end
@@ -374,7 +383,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v9004 Ready.")
+    print("Ncoco v9006 Ready.")
   end)
 end
 
