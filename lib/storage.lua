@@ -1,8 +1,9 @@
--- lib/storage.lua v9005
--- CHANGELOG v9005:
+-- lib/storage.lua v9007
+-- CHANGELOG v9007:
+-- 1. FIX: Added explicit save/load for individual tape lengths (L/R) to prevent default reset.
+-- CHANGELOG v4000:
 -- 1. TOTAL RECALL: Added snapshot data & state persistence.
 -- 2. CASCADE LOAD: Implemented staggered loading (Clock Run) to avoid CPU spikes.
--- 3. fix sequencer state on load
 
 local Storage = {}
 
@@ -22,9 +23,14 @@ function Storage.save(G, pset_number)
   local path1 = _path.audio .. "ncoco/pset_" .. pset_number .. "_L_" .. t .. ".wav"
   local path2 = _path.audio .. "ncoco/pset_" .. pset_number .. "_R_" .. t .. ".wav"
   
+  -- [MOD] Get individual lengths instead of just the legacy macro
   local len = params:get("tape_len")
-  engine.write_tape(1, path1, len)
-  engine.write_tape(2, path2, len)
+  local len_l = params:get("tape_len_L")
+  local len_r = params:get("tape_len_R")
+  
+  -- Write tape using the specific length for safety, though engine handles max buffer
+  engine.write_tape(1, path1, len_l)
+  engine.write_tape(2, path2, len_r)
   
   -- Gather Sequencer Active States
   local seq_states = {}
@@ -37,7 +43,12 @@ function Storage.save(G, pset_number)
     dest_gains = G.dest_gains,
     tape_path_l = path1,
     tape_path_r = path2,
-    tape_len = len,
+    
+    -- [MOD] Save specific lengths
+    tape_len = len, -- Keep legacy for backward compatibility
+    tape_len_l = len_l,
+    tape_len_r = len_r,
+    
     sequencers = G.sequencers,
     
     -- v4000 Additions
@@ -74,17 +85,21 @@ function Storage.load(G, SC, pset_number)
          SC.update_dest_gains(G) 
       end
       
+      -- [MOD] Load lengths correctly
+      -- First load legacy (sets both), then overwrite with specifics if they exist
       if data.tape_len then params:set("tape_len", data.tape_len) end
+      if data.tape_len_l then params:set("tape_len_L", data.tape_len_l) end
+      if data.tape_len_r then params:set("tape_len_R", data.tape_len_r) end
       
       -- Load Snapshots to Memory
       if data.snapshots then G.snapshots = data.snapshots end
       G.active_snapshot = data.active_snapshot or 0
+      
       -- Load Sequencer Data (But don't start yet)
       if data.sequencers then
          G.sequencers = data.sequencers
          for i=1,4 do 
             G.sequencers[i].double_click_timer = nil 
-            
             -- CORRECCIÓN: Solo poner estado 3 si hay datos grabados
             if G.sequencers[i].data and #G.sequencers[i].data > 0 then
                 G.sequencers[i].state = 3 -- Stopped (Ready)
