@@ -1,4 +1,6 @@
--- lib/grid_nav.lua v10001
+-- lib/grid_nav.lua v9006
+-- CHANGELOG v9006:
+-- 1. REFRESH: Added auto-heal mechanism (cache reset) to fix frozen LEDs.
 -- CHANGELOG v10001 (FINAL AUDIT):
 -- 1. REFRESH: Unlocked "is_dirty" block to allow 30Hz fluid animation.
 -- 2. OPTIMIZATION: Jacks logic separated (Static Patching vs Dynamic Monitoring).
@@ -10,6 +12,7 @@ GridNav.cache = {}
 GridNav.debounce = {} 
 GridNav.snap_timers = {}
 GridNav.is_dirty = true
+GridNav.refresh_counter = 0
 
 function GridNav.init_map(G)
   G.grid_map = {}
@@ -46,6 +49,15 @@ function GridNav.init_map(G)
   for x=1,7 do map(x,8,'fader',1, x) end 
   map(8,8,'jack',1);  map(9,8,'jack',8);  
   for x=10,16 do map(x,8,'fader',2, 17-x) end
+end
+
+-- [FIX] Function to force full redraw (cache reset)
+function GridNav.reset_cache()
+  for x=1,16 do 
+     for y=1,8 do 
+        GridNav.cache[x][y] = -1 
+     end 
+  end
 end
 
 function GridNav.key(G, g, x, y, z, simulated)
@@ -245,6 +257,15 @@ end
 function GridNav.redraw(G, g)
   -- UNLOCKED: "is_dirty" check removed to allow 30Hz fluid animation.
   -- The cache check (Differential Update) at the end protects the serial bus.
+  
+  if not g then return end
+  
+  -- [FIX] Auto-Heal: Force full refresh every ~2-4 seconds to fix frozen LEDs
+  GridNav.refresh_counter = GridNav.refresh_counter + 1
+  if GridNav.refresh_counter > 60 then
+     GridNav.reset_cache()
+     GridNav.refresh_counter = 0
+  end
 
   for x=1,16 do for y=1,8 do
     local obj=G.grid_map[x][y]; local b=0
