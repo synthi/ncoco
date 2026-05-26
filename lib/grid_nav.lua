@@ -1,4 +1,7 @@
--- lib/grid_nav.lua v2.01
+-- lib/grid_nav.lua v2.02
+-- CHANGELOG v2.02:
+-- 1. NEW: Snapshots can be recorded/played by sequencers (simulated snaps skip timer).
+-- 2. FIX: Removed auto-heal (was ineffective, cause fixed upstream).
 -- CHANGELOG v2.01:
 -- 1. OPT: Sequencer simulated events skip g:led/g:refresh to reduce USB traffic.
 -- CHANGELOG v2.00:
@@ -80,7 +83,7 @@ function GridNav.key(G, g, x, y, z, simulated)
   end
   
   if not simulated and obj.t ~= 'seq' and G.sequencers then
-    if obj.t == 'rec' or obj.t == 'flip' or obj.t == 'skip' or obj.t == 'fader' then
+    if obj.t == 'rec' or obj.t == 'flip' or obj.t == 'skip' or obj.t == 'fader' or obj.t == 'snap' then
         local now = util.time()
         for i=1, 4 do
           local s = G.sequencers[i]
@@ -99,11 +102,23 @@ function GridNav.key(G, g, x, y, z, simulated)
     if g and not simulated then g:led(x, y, 15); g:refresh() end 
   end
   
-  if not simulated and z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec' or obj.t == 'seq' or obj.t == 'fader') then 
+  if not simulated and z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec' or obj.t == 'seq' or obj.t == 'fader' or obj.t == 'snap') then 
     GridNav.cache[x][y] = -1
   end
 
   if obj.t == 'snap' then
+     -- SECUENCIADOR: accion inmediata (sin timer, no puede borrar snapshots)
+     if simulated then
+        if z == 1 then
+           if G.snapshots[obj.id] == nil then
+              G.snap_save(obj.id)
+           else
+              G.snap_load(obj.id)
+           end
+        end
+        return
+     end
+     
      if z == 1 then
         GridNav.snap_timers[obj.id] = util.time()
         clock.run(function()
@@ -265,12 +280,12 @@ function GridNav.redraw(G, g)
   
   if not g then return end
   
-  -- [FIX] Auto-Heal: Force full refresh every ~2 seconds to fix frozen LEDs
-  GridNav.refresh_counter = GridNav.refresh_counter + 1
-  if GridNav.refresh_counter > 30 then
-     GridNav.reset_cache()
-     GridNav.refresh_counter = 0
-  end
+  -- [FIX] Auto-Heal: disabled (was ineffective, root cause fixed in v2.00)
+  -- GridNav.refresh_counter = GridNav.refresh_counter + 1
+  -- if GridNav.refresh_counter > 30 then
+  --    GridNav.reset_cache()
+  --    GridNav.refresh_counter = 0
+  -- end
 
   for x=1,16 do for y=1,8 do
     local obj=G.grid_map[x][y]; local b=0

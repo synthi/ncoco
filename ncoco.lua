@@ -1,4 +1,7 @@
--- ncoco.lua v2.01
+-- ncoco.lua v2.02
+-- CHANGELOG v2.02:
+-- 1. NEW: Sequencers can now record/play snapshot button presses.
+-- 2. FIX: Removed legacy snapshot comment (code was always present).
 -- CHANGELOG v2.01:
 -- 1. OPT: Sequencer simulated events skip g:led/g:refresh to reduce USB traffic.
 -- CHANGELOG v2.00:
@@ -32,9 +35,7 @@ if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
 end
 
--- SNAPSHOT LOGIC REMOVED FOR BREVITY (It is identical to v4003)
--- ... [Assuming Snapshot code is here as in previous versions] ...
--- Re-inserting required minimal snapshot code to prevent errors
+-- SNAPSHOT FUNCTIONS
 local SNAP_NAMES = {"A", "B", "C", "D"}
 local function copy_table(t)
   if type(t) ~= 'table' then return t end
@@ -392,7 +393,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v2.01 Ready.")
+    print("Ncoco v2.02 Ready.")
   end)
 end
 
