@@ -1,4 +1,6 @@
--- lib/quantussy.lua v3002
+-- lib/quantussy.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v3002:
 -- 1. CRIT FIX: Restored Q.coords initialization (Fixed "nil value 'p'" crash).
 -- 2. LOGIC: Properly switch between Solid Rect (LFO) and Nebula Points (Audio).

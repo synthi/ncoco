@@ -1,4 +1,6 @@
-// Engine_Ncoco.sc v10017
+// Engine_Ncoco.sc v2.01
+// CHANGELOG v2.01:
+// 1. META: Version bump to 2.01 (project-wide alignment).
 // CHANGELOG v10017 (BLEED ROUTING):
 // 1. ARCHITECTURE: Added 'b_bleed' audio bus to transport Clock Noise separately from Core to Out.
 // 2. LOGIC: Added 'bleedPost' parameter in NcocoOut.

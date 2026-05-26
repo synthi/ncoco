@@ -1,4 +1,6 @@
--- ncoco.lua v2.00
+-- ncoco.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. OPT: Sequencer simulated events skip g:led/g:refresh to reduce USB traffic.
 -- CHANGELOG v2.00:
 -- 1. FIX: Protected OSC handler with nil guards (args[N] or 0) to prevent grid freeze.
 -- 2. FIX: Added error logging to grid_metro pcall for debugging grid redraw failures.
@@ -390,7 +392,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v2.00 Ready.")
+    print("Ncoco v2.01 Ready.")
   end)
 end
 

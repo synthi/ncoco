@@ -1,4 +1,6 @@
--- lib/sc_utils.lua v9004
+-- lib/sc_utils.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:
 -- 1. ADDED: set_coco_slew command with safety check.
 

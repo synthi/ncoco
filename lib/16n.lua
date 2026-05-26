@@ -1,4 +1,6 @@
--- lib/16n.lua v3007
+-- lib/16n.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v3007:
 -- 1. ROLLBACK: Removed "Smart Wake-Up" filter completely.
 --    Reason: The filter was blocking smooth 1-step movements, turning them into steps/zipper noise.

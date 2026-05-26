@@ -1,4 +1,6 @@
--- lib/grid_nav.lua v2.00
+-- lib/grid_nav.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. OPT: Sequencer simulated events skip g:led/g:refresh to reduce USB traffic.
 -- CHANGELOG v2.00:
 -- 1. FIX: Protected energy calculation with nil guards (sources_val) to prevent grid freeze.
 -- 2. OPT: Lowered auto-heal trigger from 60 to 30 frames (~2s) for faster recovery.
@@ -94,10 +96,10 @@ function GridNav.key(G, g, x, y, z, simulated)
 
   if z == 1 then 
     GridNav.cache[x][y] = 15
-    if g then g:led(x, y, 15); g:refresh() end 
+    if g and not simulated then g:led(x, y, 15); g:refresh() end 
   end
   
-  if z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec' or obj.t == 'seq' or obj.t == 'fader') then 
+  if not simulated and z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec' or obj.t == 'seq' or obj.t == 'fader') then 
     GridNav.cache[x][y] = -1
   end
 

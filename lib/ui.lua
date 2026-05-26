@@ -1,4 +1,6 @@
--- lib/ui.lua v9004
+-- lib/ui.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:
 -- 1. INSPECTOR: Added E3 Slew visualization to Coco Inspector.
 

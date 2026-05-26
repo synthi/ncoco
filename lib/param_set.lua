@@ -1,4 +1,6 @@
--- lib/param_set.lua v10019
+-- lib/param_set.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9005:
 -- 1. NEW: Added 'bleed_routing' (Pre/Post Filter) option.
 -- fix load file message in sc

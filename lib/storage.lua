@@ -1,4 +1,6 @@
--- lib/storage.lua v9007
+-- lib/storage.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9007:
 -- 1. FIX: Added explicit save/load for individual tape lengths (L/R) to prevent default reset.
 -- CHANGELOG v4000:

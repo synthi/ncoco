@@ -1,4 +1,6 @@
--- lib/globals.lua v9000
+-- lib/globals.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9000:
 -- 1. DATA: Increased Scope History and Sources Values arrays to 12 (to support Coco Outs).
 -- 2. MATRIX: Increased patch matrix size to 12 sources.
