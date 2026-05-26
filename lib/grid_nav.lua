@@ -1,4 +1,6 @@
--- lib/grid_nav.lua v2.02
+-- lib/grid_nav.lua v2.03
+-- CHANGELOG v2.03:
+-- 1. FIX: Added 10000 event limit per sequencer to prevent memory leaks.
 -- CHANGELOG v2.02:
 -- 1. NEW: Snapshots can be recorded/played by sequencers (simulated snaps skip timer).
 -- 2. FIX: Removed auto-heal (was ineffective, cause fixed upstream).
@@ -90,7 +92,9 @@ function GridNav.key(G, g, x, y, z, simulated)
           if s and (s.state == 1 or s.state == 4) then 
              local dt = now - s.start_time
              if s.state == 4 and s.duration > 0 then dt = dt % s.duration end
-             table.insert(s.data, {x=x, y=y, z=z, dt=dt})
+             if #s.data < 10000 then
+               table.insert(s.data, {x=x, y=y, z=z, dt=dt})
+            end
              if s.state == 4 then table.sort(s.data, function(a,b) return a.dt < b.dt end) end
           end
         end

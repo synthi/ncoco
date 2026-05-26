@@ -1,4 +1,11 @@
--- ncoco.lua v2.02
+-- ncoco.lua v2.03
+-- CHANGELOG v2.03:
+-- 1. FIX: Added math.randomseed() for random petal seeds at script start.
+-- 2. FIX: Replaced recursive copy_table with shallow copy for safety.
+-- 3. FIX: Clock IDs now tracked and cancelled in cleanup() to prevent leaks.
+-- 4. FIX: Improved pcall(include) error messages for debugging.
+-- 5. FIX: Added #args validation in OSC handler.
+-- 6. OPT: Reduced sequencer tick rate from 100Hz to 30Hz.
 -- CHANGELOG v2.02:
 -- 1. NEW: Sequencers can now record/play snapshot button presses.
 -- 2. FIX: Removed legacy snapshot comment (code was always present).
@@ -17,19 +24,25 @@
 
 engine.name = 'Ncoco'
 
-local status, G = pcall(include, 'ncoco/lib/globals')
-if not status then print("CRITICAL: globals missing"); return end
-local status, SC = pcall(include, 'ncoco/lib/sc_utils')
-local status, GridNav = pcall(include, 'ncoco/lib/grid_nav')
-local status, UI = pcall(include, 'ncoco/lib/ui')
-local status, _16n = pcall(include, 'ncoco/lib/16n')
-local status, Params = pcall(include, 'ncoco/lib/param_set')
-local status, Storage = pcall(include, 'ncoco/lib/storage') 
+local function safe_include(name)
+  local ok, result = pcall(include, name)
+  if not ok then print("CRITICAL: " .. name .. " - " .. tostring(result)); return nil end
+  return result
+end
+local G = safe_include('ncoco/lib/globals')
+if not G then return end
+local SC = safe_include('ncoco/lib/sc_utils')
+local GridNav = safe_include('ncoco/lib/grid_nav')
+local UI = safe_include('ncoco/lib/ui')
+local _16n = safe_include('ncoco/lib/16n')
+local Params = safe_include('ncoco/lib/param_set')
+local Storage = safe_include('ncoco/lib/storage') 
 
--- DEFINED LOCAL METROS
+-- DEFINED LOCAL METROS & CLOCK TRACKING
 local g = grid.connect()
 local grid_metro
 local screen_metro
+local clock_ids = {}
 
 if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
@@ -37,15 +50,20 @@ end
 
 -- SNAPSHOT FUNCTIONS
 local SNAP_NAMES = {"A", "B", "C", "D"}
-local function copy_table(t)
-  if type(t) ~= 'table' then return t end
+local function shallow_copy_patch(t)
+  -- Patch matrix is 12x24 numbers, no recursion needed
   local res = {}
-  for k, v in pairs(t) do res[copy_table(k)] = copy_table(v) end
+  for s=1, 12 do
+    res[s] = {}
+    for d=1, 24 do
+      res[s][d] = (t[s] and t[s][d]) or 0
+    end
+  end
   return res
 end
 function G.snap_capture()
   local data = {}
-  data.patch = copy_table(G.patch)
+  data.patch = shallow_copy_patch(G.patch)
   data.petals = {}
   for i=1, 6 do
      data.petals[i] = {
@@ -228,7 +246,7 @@ local function run_sequencer(id, grid_device)
        else
           trigger_window(old_head, s.playhead)
        end
-       clock.sleep(0.01) 
+       clock.sleep(1/30) 
     else
        s.last_cpu_time = util.time()
        s.playhead = 0
@@ -252,6 +270,10 @@ local function get_petal_param(id)
 end
 
 function init()
+  -- Seed random generator for unique petal sounds each session
+  -- (PSETs overwrite these values on load, so consistency is preserved)
+  math.randomseed(os.time())
+  
   GridNav.init_map(G)
   Params.init(SC, G)
   
@@ -260,6 +282,9 @@ function init()
 
   osc.event = function(path, args, from)
     if path == '/update' then
+      if #args < 24 then
+         print("OSC WARNING: /update truncated (" .. tostring(#args) .. " args)")
+      end
       G.coco[1].pos = args[1] or 0; G.coco[2].pos = args[2] or 0
       G.coco[1].gate_rec = args[3] or 0; G.coco[2].gate_rec = args[4] or 0
       G.coco[1].gate_flip = args[5] or 0; G.coco[2].gate_flip = args[6] or 0 
@@ -304,7 +329,10 @@ function init()
     -- [FIX] Load last saved preset (overwriting random init values)
     params:default()
     
-    for i=1, 4 do clock.run(function() run_sequencer(i, g) end) end
+    for i=1, 4 do
+       local cid = clock.run(function() run_sequencer(i, g) end)
+       clock_ids[i] = cid
+    end
 
     grid_metro = metro.init(); grid_metro.time = 1/15
     grid_metro.event = function()
@@ -323,7 +351,7 @@ function init()
     screen_metro.event = function() redraw() end
     screen_metro:start()
     
-    clock.run(function()
+    local cid_16n = clock.run(function()
        clock.sleep(2.0)
        _16n.init(function(msg) 
           local id = _16n.cc_2_slider_id(msg.cc)
@@ -391,9 +419,10 @@ function init()
        end)
        print("16n initialized.")
     end)
+    clock_ids[5] = cid_16n
     
     G.loaded = true 
-    print("Ncoco v2.02 Ready.")
+    print("Ncoco v2.03 Ready.")
   end)
 end
 
@@ -421,6 +450,10 @@ end
 function cleanup()
   if grid_metro then grid_metro:stop() end
   if screen_metro then screen_metro:stop() end
+  for _, cid in ipairs(clock_ids) do
+     if cid then clock.cancel(cid) end
+  end
+  clock_ids = {}
 end
 
 function g.key(x,y,z) 
