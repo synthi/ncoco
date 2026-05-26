@@ -1,4 +1,8 @@
--- ncoco.lua v9006
+-- ncoco.lua v2.00
+-- CHANGELOG v2.00:
+-- 1. FIX: Protected OSC handler with nil guards (args[N] or 0) to prevent grid freeze.
+-- 2. FIX: Added error logging to grid_metro pcall for debugging grid redraw failures.
+-- 3. OPT: Reduced auto-heal threshold from 60 to 30 frames for faster recovery.
 -- CHANGELOG v9006:
 -- 1. SYSTEM: Added Grid auto-refresh and cache reset to fix frozen LEDs.
 -- 2. PRESET: Fixed params:default() placement for correct loading.
@@ -253,18 +257,18 @@ function init()
 
   osc.event = function(path, args, from)
     if path == '/update' then
-      G.coco[1].pos = args[1]; G.coco[2].pos = args[2]
-      G.coco[1].gate_rec = args[3]; G.coco[2].gate_rec = args[4]
-      G.coco[1].gate_flip = args[5]; G.coco[2].gate_flip = args[6] 
-      G.coco[1].gate_skip = args[7]; G.coco[2].gate_skip = args[8]
-      for i=1, 6 do G.sources_val[i] = args[8+i] end
-      G.sources_val[7] = args[15]; G.sources_val[8] = args[16]
-      G.sources_val[9] = args[17]; G.sources_val[10] = args[18]
-      G.coco[1].real_speed = args[19]; G.coco[2].real_speed = args[20]
-      G.coco[1].out_level = args[21]; G.coco[2].out_level = args[22]
+      G.coco[1].pos = args[1] or 0; G.coco[2].pos = args[2] or 0
+      G.coco[1].gate_rec = args[3] or 0; G.coco[2].gate_rec = args[4] or 0
+      G.coco[1].gate_flip = args[5] or 0; G.coco[2].gate_flip = args[6] or 0 
+      G.coco[1].gate_skip = args[7] or 0; G.coco[2].gate_skip = args[8] or 0
+      for i=1, 6 do G.sources_val[i] = (args[8+i] or 0) end
+      G.sources_val[7] = (args[15] or 0); G.sources_val[8] = (args[16] or 0)
+      G.sources_val[9] = (args[17] or 0); G.sources_val[10] = (args[18] or 0)
+      G.coco[1].real_speed = (args[19] or 0); G.coco[2].real_speed = (args[20] or 0)
+      G.coco[1].out_level = (args[21] or 0); G.coco[2].out_level = (args[22] or 0)
       
-      if args[23] then G.sources_val[11] = args[23] end
-      if args[24] then G.sources_val[12] = args[24] end
+      if args[23] then G.sources_val[11] = args[23] else G.sources_val[11] = 0 end
+      if args[24] then G.sources_val[12] = args[24] else G.sources_val[12] = 0 end
       
     elseif path == '/buffer_info' then
       local dur = args[2]
@@ -300,7 +304,10 @@ function init()
     for i=1, 4 do clock.run(function() run_sequencer(i, g) end) end
 
     grid_metro = metro.init(); grid_metro.time = 1/15
-    grid_metro.event = function() pcall(GridNav.redraw, G, g) end
+    grid_metro.event = function()
+       local ok, err = pcall(GridNav.redraw, G, g)
+       if not ok then print("GRID_REDRAW_ERROR: " .. tostring(err)) end
+    end
     grid_metro:start()
     
     -- [FIX] Grid Auto-Heal callback
@@ -383,7 +390,7 @@ function init()
     end)
     
     G.loaded = true 
-    print("Ncoco v9006 Ready.")
+    print("Ncoco v2.00 Ready.")
   end)
 end
 

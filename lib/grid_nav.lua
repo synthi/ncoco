@@ -1,4 +1,7 @@
--- lib/grid_nav.lua v9006
+-- lib/grid_nav.lua v2.00
+-- CHANGELOG v2.00:
+-- 1. FIX: Protected energy calculation with nil guards (sources_val) to prevent grid freeze.
+-- 2. OPT: Lowered auto-heal trigger from 60 to 30 frames (~2s) for faster recovery.
 -- CHANGELOG v9006:
 -- 1. REFRESH: Added auto-heal mechanism (cache reset) to fix frozen LEDs.
 -- CHANGELOG v10001 (FINAL AUDIT):
@@ -260,9 +263,9 @@ function GridNav.redraw(G, g)
   
   if not g then return end
   
-  -- [FIX] Auto-Heal: Force full refresh every ~2-4 seconds to fix frozen LEDs
+  -- [FIX] Auto-Heal: Force full refresh every ~2 seconds to fix frozen LEDs
   GridNav.refresh_counter = GridNav.refresh_counter + 1
-  if GridNav.refresh_counter > 60 then
+  if GridNav.refresh_counter > 30 then
      GridNav.reset_cache()
      GridNav.refresh_counter = 0
   end
@@ -313,8 +316,8 @@ function GridNav.redraw(G, g)
           local energy = 0
           for src=1, 12 do
              if G.patch[src] and G.patch[src][obj.id] then
-                local amt = G.patch[src][obj.id]
-                if amt ~= 0 then energy = energy + math.abs(G.sources_val[src] * amt) end
+                local amt = G.patch[src][obj.id] or 0
+                if amt ~= 0 then energy = energy + math.abs((G.sources_val[src] or 0) * amt) end
              end
           end
           local alive = math.floor(energy * 5)
