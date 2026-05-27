@@ -345,7 +345,7 @@ Engine_Ncoco : CroneEngine {
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
             bleedPost=0, // [NEW] Param
             djFilterType=0, // [v2.04] 0=Classic LPF/HPF, 1=DFM1
-            dfm1Gain=0.35; // [v2.04] DFM1 gain compensation (real-time adjustable)
+            dfm1Gain=0.22; // [v2.04] DFM1 gain compensation (real-time adjustable)
 
             // --- VARS (ALL DECLARED AT TOP) ---
             var readL, readR, monL, monR, bleedL, bleedR;
@@ -394,9 +394,9 @@ Engine_Ncoco : CroneEngine {
             classicL = HPF.ar(LPF.ar(sigL, lpfFreqL), hpfFreqL);
             classicR = HPF.ar(LPF.ar(sigR, lpfFreqR), hpfFreqR);
 
-            // DFM1 path (same freq curves, type: 0=LP, 1=HP, gain-compensated to match Classic)
-            dfm1L = DFM1.ar(DFM1.ar(sigL, lpfFreqL, 0, 1.0, 0, 0.0003), hpfFreqL, 0, 1.0, 1, 0.0003) * dfm1Gain;
-            dfm1R = DFM1.ar(DFM1.ar(sigR, lpfFreqR, 0, 1.0, 0, 0.0003), hpfFreqR, 0, 1.0, 1, 0.0003) * dfm1Gain;
+            // DFM1 path (LP same freq, HP extended to 18kHz to compensate softer rolloff)
+            dfm1L = DFM1.ar(DFM1.ar(sigL, lpfFreqL, 0, 1.0, 0, 0.0003), totalFiltL.max(0).linexp(0, 1, 20, 18000), 0, 1.0, 1, 0.0003) * dfm1Gain;
+            dfm1R = DFM1.ar(DFM1.ar(sigR, lpfFreqR, 0, 1.0, 0, 0.0003), totalFiltR.max(0).linexp(0, 1, 20, 18000), 0, 1.0, 1, 0.0003) * dfm1Gain;
 
             // Select filter type when filter is active (|totalFilt| >= 0.05)
 			sigL = Select.ar(totalFiltL.abs < 0.05, [

@@ -43,7 +43,7 @@ function Params.init(SC, G)
   end)
 
   -- [v2.04] DFM1 Gain compensation (only visible when DFM1 is selected)
-  params:add_control("dfm1_gain", "DFM1 Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.35))
+  params:add_control("dfm1_gain", "DFM1 Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.22))
   params:set_action("dfm1_gain", function(x) engine.dj_filter_gain(x) end)
   params:hide("dfm1_gain")
 
