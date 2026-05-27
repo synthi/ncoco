@@ -1,7 +1,7 @@
 // Engine_Ncoco.sc v2.06
 // CHANGELOG v2.06:
 // 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
-// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes — 15kHz max, closes properly.
+// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes - 15kHz max, closes properly.
 // 3. TWEAK: Default DFM1 gain 0.15 (conservative for 2-stage LPF cascade).
 // CHANGELOG v2.04:
 // 1. ENHANCEMENT: DJ Filter now has DFM1 option (menu param, default=Classic).
@@ -349,7 +349,7 @@ Engine_Ncoco : CroneEngine {
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
             bleedPost=0, // [NEW] Param
             djFilterType=0, // [v2.04] 0=Classic LPF/HPF, 1=DFM1
-            dfm1Gain=0.15; // [v2.06] DFM1 gain compensation (2-stage LPF cascade, real-time adjustable)
+            dfm1Gain=0.32; // [v2.07] Analog filter gain compensation (2-stage LPF cascade, real-time adjustable)
 
             // --- VARS (ALL DECLARED AT TOP) ---
             var readL, readR, monL, monR, bleedL, bleedR;
@@ -398,7 +398,7 @@ Engine_Ncoco : CroneEngine {
             classicL = HPF.ar(LPF.ar(sigL, lpfFreqL), hpfFreqL);
             classicR = HPF.ar(LPF.ar(sigR, lpfFreqR), hpfFreqR);
 
-            // [v2.06] DFM1 path: LPF×2 (pre-attenuated) + HPF always Classic
+// [v2.06] DFM1 path: LPF x2 (pre-attenuated) + HPF always Classic
             // L channel
             dfm1L = DFM1.ar(sigL * 0.7, lpfFreqL, 0, 1.0, 0, 0.0003);  // LPF stage 1 (pre-atten -3dB)
             dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);       // LPF stage 2
