@@ -13,7 +13,7 @@ local Params = {}
 function Params.init(SC, G)
   params:add_separator("Ncoco")
   
-  params:add_group("GLOBALS", 6) -- Increased count
+  params:add_group("GLOBALS", 7) -- Increased count
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
@@ -32,7 +32,20 @@ function Params.init(SC, G)
 
   -- [v2.04] DJ Filter Type: Classic (original LPF/HPF) or DFM1
   params:add_option("dj_filter_type", "DJ Filter Type", {"Classic", "DFM1"}, 1)
-  params:set_action("dj_filter_type", function(x) engine.dj_filter_type(x-1) end)
+  params:set_action("dj_filter_type", function(x)
+    engine.dj_filter_type(x-1)
+    if x == 2 then
+      params:show("dfm1_gain")
+    else
+      params:hide("dfm1_gain")
+    end
+    _menu.rebuild_params()
+  end)
+
+  -- [v2.04] DFM1 Gain compensation (only visible when DFM1 is selected)
+  params:add_control("dfm1_gain", "DFM1 Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.35))
+  params:set_action("dfm1_gain", function(x) engine.dj_filter_gain(x) end)
+  params:hide("dfm1_gain")
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
