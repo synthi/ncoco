@@ -38,15 +38,9 @@ function Params.init(SC, G)
   params:add_option("dj_filter_type", "DJ Filter Type", {"Classic", "Analog"}, 2)
   params:set_action("dj_filter_type", function(x)
     engine.dj_filter_type(x-1)
-    if x == 2 then
-      params:show("analog_gain")
-    else
-      params:hide("analog_gain")
-    end
-    _menu.rebuild_params()
   end)
 
-  -- [v2.07] Analog Filter Gain (only visible when Analog is selected)
+  -- [v2.07] Analog Filter Gain (always visible, only used when Analog is selected)
   params:add_control("analog_gain", "Analog Filter Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.32))
   params:set_action("analog_gain", function(x) engine.dj_filter_gain(x) end)
 

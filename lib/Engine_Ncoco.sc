@@ -322,8 +322,8 @@ Engine_Ncoco : CroneEngine {
 			dfm1FbFreqR = dfm1FbFreqL * 1.06; // +6% tolerance
 			fbClassicL = LPF.ar(feedbackL, fixedFiltFreqL);
 			fbClassicR = LPF.ar(feedbackR, fixedFiltFreqR);
-			fbAnalogL = DFM1.ar(feedbackL, dfm1FbFreqL, 0, 1.0, 0, 0.0003) * 0.22;
-			fbAnalogR = DFM1.ar(feedbackR, dfm1FbFreqR, 0, 1.0, 0, 0.0003) * 0.22;
+			fbAnalogL = DFM1.ar(feedbackL * 0.5, dfm1FbFreqL, 0, 1.0, 0, 0.0003) * 0.44; // pre-atten for stability, net gain 0.22
+			fbAnalogR = DFM1.ar(feedbackR * 0.5, dfm1FbFreqR, 0, 1.0, 0, 0.0003) * 0.44;
 			feedbackL = Select.ar(fbFilterType, [fbClassicL, fbAnalogL]).softclip;
 			feedbackR = Select.ar(fbFilterType, [fbClassicR, fbAnalogR]).softclip;
 			
