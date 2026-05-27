@@ -1,8 +1,12 @@
-// Engine_Ncoco.sc v2.06
+// Engine_Ncoco.sc v2.07
+// CHANGELOG v2.07:
+// 1. RENAME: "DFM1" → "Analog" in labels/defaults.
+// 2. NEW: Feedback Filter param (Classic/Analog) — Analog uses DFM1 1-pole with 0.22 gain.
+// 3. TWEAK: Component tolerances L vs R (noise, jitter, bleed, filter freq, input HPF).
+// 4. TWEAK: DJ Filter default Analog, gain 0.32.
 // CHANGELOG v2.06:
 // 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
 // 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes — 15kHz max, closes properly.
-// 3. TWEAK: Default DFM1 gain 0.15 (conservative for 2-stage LPF cascade).
 // CHANGELOG v2.04:
 // 1. ENHANCEMENT: DJ Filter now has DFM1 option (menu param, default=Classic).
 // 2. FIX: Removed dead ampL/ampR commands (overwritten by "both" commands below).
@@ -75,6 +79,7 @@ Engine_Ncoco : CroneEngine {
             coco1OutMode=0, coco2OutMode=0, 
             cocoSlewL=0.1, cocoSlewR=0.1,
 
+			fbFilterType=0, // [v2.07] 0=Classic (LPF.ar), 1=Analog (DFM1 1-pole)
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
 
 			// --- VARS ---
@@ -140,6 +145,7 @@ Engine_Ncoco : CroneEngine {
             var src11_ar, src12_ar; 
             var fb_src11, fb_src12; 
 			var bleedAmpL, bleedAmpR;
+			var dfm1FbFreqL, dfm1FbFreqR, fbClassicL, fbClassicR, fbAnalogL, fbAnalogR; // [v2.07] Feedback filter
 
 			// --- CORE DSP ---
 			
@@ -153,7 +159,7 @@ Engine_Ncoco : CroneEngine {
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
 			inputL_sig = In.ar(inL); inputR_sig = In.ar(inR);
 			
-            inputL_sig = HPF.ar(inputL_sig, 20); inputR_sig = HPF.ar(inputR_sig, 20);
+            inputL_sig = HPF.ar(inputL_sig, 20); inputR_sig = HPF.ar(inputR_sig, 20.8); // [v2.07] R: +4% cap tolerance
 			inputL_sig = ((inputL_sig * preampL) + preampNoiseL).tanh; 
 			inputR_sig = ((inputR_sig * preampR) + preampNoiseR).tanh;
 			
@@ -169,12 +175,12 @@ Engine_Ncoco : CroneEngine {
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			
 			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.0016) + ((1 - is8L - is12L) * 0.00016));
-			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.0016) + ((1 - is8R - is12R) * 0.00016));
+			noiseR = PinkNoise.ar((is8R * 0.0076) + (is12R * 0.00152) + ((1 - is8R - is12R) * 0.00015)); // [v2.07] -5% tolerance
 			
 			baseSR_L = (is8L * 16000) + (is12L * 31250) + ((1 - is8L - is12L) * 39000);
 			baseSR_R = ((is8R * 16000) + (is12R * 31250) + ((1 - is8R - is12R) * 39000)) * 1.002;
             fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + ((1 - is8L - is12L) * 18000);
-            fixedFiltFreqR = fixedFiltFreqL * 1.04;
+            fixedFiltFreqR = fixedFiltFreqL * 1.06; // [v2.07] +6% RC tolerance (was 1.04)
             interpL = 1 + (1 - is8L - is12L); 
             interpR = 1 + (1 - is8R - is12R);
 			
@@ -262,7 +268,7 @@ Engine_Ncoco : CroneEngine {
 			
             // Bleed Logic
             bleedAmpL = (is8L * 0.0025) + (is12L * 0.001); 
-            bleedAmpR = (is8R * 0.0025) + (is12R * 0.001);
+            bleedAmpR = (is8R * 0.00238) + (is12R * 0.00095); // [v2.07] -5% coupling tolerance
 			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmpL;
 			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmpR;
 
@@ -309,9 +315,17 @@ Engine_Ncoco : CroneEngine {
 			dryR = inputR_sig * (volInR + mod_val_ampR).clip(0, 2);
 
 			feedbackL = readL * (fbL + mod_val_fbL).clip(0, 1.2) * 1.15;
-			feedbackR = readR * (fbR + mod_val_fbR).clip(0, 1.2) * 1.15;
-			feedbackL = LPF.ar(feedbackL, fixedFiltFreqL).softclip;
-			feedbackR = LPF.ar(feedbackR, fixedFiltFreqR).softclip;
+			feedbackR = readR * (fbR + mod_val_fbR).clip(0, 1.2) * 1.138; // [v2.07] -1% resistor tolerance
+			
+			// [v2.07] Feedback Filter: Classic (LPF.ar) / Analog (DFM1 1-pole)
+			dfm1FbFreqL = (is8L * 4200) + (is12L * 8000) + ((1 - is8L - is12L) * 12000);
+			dfm1FbFreqR = dfm1FbFreqL * 1.06; // +6% tolerance
+			fbClassicL = LPF.ar(feedbackL, fixedFiltFreqL);
+			fbClassicR = LPF.ar(feedbackR, fixedFiltFreqR);
+			fbAnalogL = DFM1.ar(feedbackL, dfm1FbFreqL, 0, 1.0, 0, 0.0003) * 0.22;
+			fbAnalogR = DFM1.ar(feedbackR, dfm1FbFreqR, 0, 1.0, 0, 0.0003) * 0.22;
+			feedbackL = Select.ar(fbFilterType, [fbClassicL, fbAnalogL]).softclip;
+			feedbackR = Select.ar(fbFilterType, [fbClassicR, fbAnalogR]).softclip;
 			
 			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
 			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
@@ -320,7 +334,7 @@ Engine_Ncoco : CroneEngine {
 			writeR = writeR.round(0.5 ** bitDepthR);
 			
 			jitterAmountL = (is8L * 0.02) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.001);
-			jitterAmountR = (is8R * 0.02) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.001);
+			jitterAmountR = (is8R * 0.0194) + (is12R * 0.00388) + ((1 - is8R - is12R) * 0.00097); // [v2.07] -3% clock tolerance
 			
 			writeL = Select.ar(is8L + is12L, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountL))))]);
 			writeR = Select.ar(is8R + is12R, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountR))))]);
@@ -349,7 +363,7 @@ Engine_Ncoco : CroneEngine {
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
             bleedPost=0, // [NEW] Param
             djFilterType=0, // [v2.04] 0=Classic LPF/HPF, 1=DFM1
-            dfm1Gain=0.15; // [v2.06] DFM1 gain compensation (2-stage LPF cascade, real-time adjustable)
+            dfm1Gain=0.32; // [v2.07] Analog filter gain compensation (2-stage LPF cascade, real-time adjustable)
 
             // --- VARS (ALL DECLARED AT TOP) ---
             var readL, readR, monL, monR, bleedL, bleedR;
@@ -538,6 +552,7 @@ Engine_Ncoco : CroneEngine {
         this.addCommand("bleedPost", "f", { |msg| synth_out.set(\bleedPost, msg[1]) });
         this.addCommand("dj_filter_type", "f", { |msg| synth_out.set(\djFilterType, msg[1]) }); // [v2.04]
         this.addCommand("dj_filter_gain", "f", { |msg| synth_out.set(\dfm1Gain, msg[1]) }); // [v2.04]
+        this.addCommand("feedback_filter_type", "f", { |msg| synth_core.set(\fbFilterType, msg[1]) }); // [v2.07]
 
         // PARAMS -> BOTH (Amp controls visual in Core and audio in Out)
         this.addCommand("ampL", "f", { |msg| 

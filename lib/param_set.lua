@@ -1,4 +1,8 @@
--- lib/param_set.lua v2.04
+-- lib/param_set.lua v2.07
+-- CHANGELOG v2.07:
+-- 1. RENAME: "DFM1" → "Analog" in DJ Filter labels.
+-- 2. NEW: Added 'Feedback Filter' option (Classic/Analog) in GLOBALS.
+-- 3. TWEAK: Default DJ Filter = Analog, gain 0.32.
 -- CHANGELOG v2.04:
 -- 1. NEW: Added 'DJ Filter Type' option (Classic/DFM1) in GLOBALS.
 -- CHANGELOG v2.01:
@@ -13,7 +17,7 @@ local Params = {}
 function Params.init(SC, G)
   params:add_separator("Ncoco")
   
-  params:add_group("GLOBALS", 7) -- Increased count
+  params:add_group("GLOBALS", 8) -- [v2.07] Increased for Feedback Filter
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
@@ -30,22 +34,25 @@ function Params.init(SC, G)
   params:add_option("bleed_routing", "Bleed Routing", {"Pre-Filter", "Post-Filter"}, 1)
   params:set_action("bleed_routing", function(x) engine.bleedPost(x-1) end)
 
-  -- [v2.04] DJ Filter Type: Classic (original LPF/HPF) or DFM1
-  params:add_option("dj_filter_type", "DJ Filter Type", {"Classic", "DFM1"}, 1)
+  -- [v2.07] DJ Filter Type: Classic or Analog (DFM1-based)
+  params:add_option("dj_filter_type", "DJ Filter Type", {"Classic", "Analog"}, 2)
   params:set_action("dj_filter_type", function(x)
     engine.dj_filter_type(x-1)
     if x == 2 then
-      params:show("dfm1_gain")
+      params:show("analog_gain")
     else
-      params:hide("dfm1_gain")
+      params:hide("analog_gain")
     end
     _menu.rebuild_params()
   end)
 
-  -- [v2.04] DFM1 Gain compensation (only visible when DFM1 is selected)
-  params:add_control("dfm1_gain", "DFM1 Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.15))
-  params:set_action("dfm1_gain", function(x) engine.dj_filter_gain(x) end)
-  params:hide("dfm1_gain")
+  -- [v2.07] Analog Filter Gain (only visible when Analog is selected)
+  params:add_control("analog_gain", "Analog Filter Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.32))
+  params:set_action("analog_gain", function(x) engine.dj_filter_gain(x) end)
+
+  -- [v2.07] Feedback Filter: Classic (LPF.ar) or Analog (DFM1 1-pole)
+  params:add_option("feedback_filter", "Feedback Filter", {"Classic", "Analog"}, 1)
+  params:set_action("feedback_filter", function(x) engine.feedback_filter_type(x-1) end)
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
