@@ -1,8 +1,8 @@
-// Engine_Ncoco.sc v2.05
-// CHANGELOG v2.05:
-// 1. FIX: DFM1 DJ Filter now uses 4-stage cascade (LPF×2 + HPF×2) for true 12dB/oct.
-// 2. FIX: DFM1 HPF max raised to 22kHz (inaudible, audio fully cuts).
-// 3. TWEAK: Default DFM1 gain 0.22 → 0.38 (compensates 4-stage attenuation).
+// Engine_Ncoco.sc v2.06
+// CHANGELOG v2.06:
+// 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
+// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes — 15kHz max, closes properly.
+// 3. TWEAK: Default DFM1 gain 0.15 (conservative for 2-stage LPF cascade).
 // CHANGELOG v2.04:
 // 1. ENHANCEMENT: DJ Filter now has DFM1 option (menu param, default=Classic).
 // 2. FIX: Removed dead ampL/ampR commands (overwritten by "both" commands below).
@@ -349,7 +349,7 @@ Engine_Ncoco : CroneEngine {
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
             bleedPost=0, // [NEW] Param
             djFilterType=0, // [v2.04] 0=Classic LPF/HPF, 1=DFM1
-            dfm1Gain=0.38; // [v2.05] DFM1 gain compensation (4-stage cascade, real-time adjustable)
+            dfm1Gain=0.15; // [v2.06] DFM1 gain compensation (2-stage LPF cascade, real-time adjustable)
 
             // --- VARS (ALL DECLARED AT TOP) ---
             var readL, readR, monL, monR, bleedL, bleedR;
@@ -358,7 +358,6 @@ Engine_Ncoco : CroneEngine {
             var totalFiltL, totalFiltR;
             var lpfFreqL, hpfFreqL, lpfFreqR, hpfFreqR;
             var classicL, classicR, dfm1L, dfm1R;
-            var dfm1HpfL, dfm1HpfR; // [v2.05] DFM1 HPF freq (22kHz max)
             var finalVolL, finalVolR;
             var master_out;
             var tape_in, mon_in, bleed_in;
@@ -399,19 +398,15 @@ Engine_Ncoco : CroneEngine {
             classicL = HPF.ar(LPF.ar(sigL, lpfFreqL), hpfFreqL);
             classicR = HPF.ar(LPF.ar(sigR, lpfFreqR), hpfFreqR);
 
-            // [v2.05] DFM1 path (4-stage cascade: LPF×2 + HPF×2 = 12dB/oct effective)
-            dfm1HpfL = totalFiltL.max(0).linexp(0, 1, 20, 22000);
-            dfm1HpfR = totalFiltR.max(0).linexp(0, 1, 20, 22000);
-            // L channel: LPF cascade then HPF cascade
-            dfm1L = DFM1.ar(sigL, lpfFreqL, 0, 1.0, 0, 0.0003);  // LPF stage 1
-            dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);  // LPF stage 2
-            dfm1L = DFM1.ar(dfm1L, dfm1HpfL, 0, 1.0, 1, 0.0003);  // HPF stage 1
-            dfm1L = DFM1.ar(dfm1L, dfm1HpfL, 0, 1.0, 1, 0.0003) * dfm1Gain; // HPF stage 2 + gain
-            // R channel: LPF cascade then HPF cascade
-            dfm1R = DFM1.ar(sigR, lpfFreqR, 0, 1.0, 0, 0.0003);  // LPF stage 1
-            dfm1R = DFM1.ar(dfm1R, lpfFreqR, 0, 1.0, 0, 0.0003);  // LPF stage 2
-            dfm1R = DFM1.ar(dfm1R, dfm1HpfR, 0, 1.0, 1, 0.0003);  // HPF stage 1
-            dfm1R = DFM1.ar(dfm1R, dfm1HpfR, 0, 1.0, 1, 0.0003) * dfm1Gain; // HPF stage 2 + gain
+            // [v2.06] DFM1 path: LPF×2 (pre-attenuated) + HPF always Classic
+            // L channel
+            dfm1L = DFM1.ar(sigL * 0.7, lpfFreqL, 0, 1.0, 0, 0.0003);  // LPF stage 1 (pre-atten -3dB)
+            dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);       // LPF stage 2
+            dfm1L = HPF.ar(dfm1L, hpfFreqL) * dfm1Gain;                  // HPF Classic (same freq as Classic mode)
+            // R channel
+            dfm1R = DFM1.ar(sigR * 0.7, lpfFreqR, 0, 1.0, 0, 0.0003);  // LPF stage 1 (pre-atten -3dB)
+            dfm1R = DFM1.ar(dfm1R, lpfFreqR, 0, 1.0, 0, 0.0003);       // LPF stage 2
+            dfm1R = HPF.ar(dfm1R, hpfFreqR) * dfm1Gain;                  // HPF Classic (same freq as Classic mode)
 
             // Select filter type when filter is active (|totalFilt| >= 0.05)
 			sigL = Select.ar(totalFiltL.abs < 0.05, [
