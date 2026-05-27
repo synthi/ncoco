@@ -1,4 +1,6 @@
--- lib/param_set.lua v2.01
+-- lib/param_set.lua v2.04
+-- CHANGELOG v2.04:
+-- 1. NEW: Added 'DJ Filter Type' option (Classic/DFM1) in GLOBALS.
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9005:
@@ -11,7 +13,7 @@ local Params = {}
 function Params.init(SC, G)
   params:add_separator("Ncoco")
   
-  params:add_group("GLOBALS", 5) -- Increased count
+  params:add_group("GLOBALS", 6) -- Increased count
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
@@ -27,6 +29,10 @@ function Params.init(SC, G)
   -- [NEW] Bleed Routing
   params:add_option("bleed_routing", "Bleed Routing", {"Pre-Filter", "Post-Filter"}, 1)
   params:set_action("bleed_routing", function(x) engine.bleedPost(x-1) end)
+
+  -- [v2.04] DJ Filter Type: Classic (original LPF/HPF) or DFM1
+  params:add_option("dj_filter_type", "DJ Filter Type", {"Classic", "DFM1"}, 1)
+  params:set_action("dj_filter_type", function(x) engine.dj_filter_type(x-1) end)
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)

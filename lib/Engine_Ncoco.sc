@@ -1,4 +1,7 @@
-// Engine_Ncoco.sc v2.01
+// Engine_Ncoco.sc v2.04
+// CHANGELOG v2.04:
+// 1. ENHANCEMENT: DJ Filter now has DFM1 option (menu param, default=Classic).
+// 2. FIX: Removed dead ampL/ampR commands (overwritten by "both" commands below).
 // CHANGELOG v2.01:
 // 1. META: Version bump to 2.01 (project-wide alignment).
 // CHANGELOG v10017 (BLEED ROUTING):
@@ -340,13 +343,16 @@ Engine_Ncoco : CroneEngine {
             arg out, bus_tape_in, bus_mon_in, bus_bleed_in, // Added bleed in
             bus_mvol_in, bus_mfilt_in,
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
-            bleedPost=0; // [NEW] Param
+            bleedPost=0, // [NEW] Param
+            djFilterType=0; // [v2.04] 0=Classic LPF/HPF, 1=DFM1
 
             // --- VARS (ALL DECLARED AT TOP) ---
             var readL, readR, monL, monR, bleedL, bleedR;
             var mod_vol, mod_filt;
             var mod_val_volL, mod_val_volR, mod_val_filtL, mod_val_filtR;
             var totalFiltL, totalFiltR;
+            var lpfFreqL, hpfFreqL, lpfFreqR, hpfFreqR;
+            var classicL, classicR, dfm1L, dfm1R;
             var finalVolL, finalVolR;
             var master_out;
             var tape_in, mon_in, bleed_in;
@@ -376,12 +382,28 @@ Engine_Ncoco : CroneEngine {
             sigL = readL + (bleedL * (1.0 - bleedPost));
             sigR = readR + (bleedR * (1.0 - bleedPost));
 
+            // [v2.04] DJ Filter with Classic/DFM1 selection
+            // Frequency calculations (identical for both paths)
+            lpfFreqL = (totalFiltL.min(0)+1).linexp(0,1,100,20000);
+            hpfFreqL = totalFiltL.max(0).linexp(0,1,20,15000);
+            lpfFreqR = (totalFiltR.min(0)+1).linexp(0,1,100,20000);
+            hpfFreqR = totalFiltR.max(0).linexp(0,1,20,15000);
+
+            // Classic path (original LPF/HPF)
+            classicL = HPF.ar(LPF.ar(sigL, lpfFreqL), hpfFreqL);
+            classicR = HPF.ar(LPF.ar(sigR, lpfFreqR), hpfFreqR);
+
+            // DFM1 path (same freq curves, type: 0=LP, 1=HP)
+            dfm1L = DFM1.ar(DFM1.ar(sigL, lpfFreqL, 0, 1.0, 0, 0.0003), hpfFreqL, 0, 1.0, 1, 0.0003);
+            dfm1R = DFM1.ar(DFM1.ar(sigR, lpfFreqR, 0, 1.0, 0, 0.0003), hpfFreqR, 0, 1.0, 1, 0.0003);
+
+            // Select filter type when filter is active (|totalFilt| >= 0.05)
 			sigL = Select.ar(totalFiltL.abs < 0.05, [
-				HPF.ar(LPF.ar(sigL, (totalFiltL.min(0)+1).linexp(0,1,100,20000)), totalFiltL.max(0).linexp(0,1,20,15000)),
+				Select.ar(djFilterType, [classicL, dfm1L]),
 				sigL
 			]);
 			sigR = Select.ar(totalFiltR.abs < 0.05, [
-				HPF.ar(LPF.ar(sigR, (totalFiltR.min(0)+1).linexp(0,1,100,20000)), totalFiltR.max(0).linexp(0,1,20,15000)),
+				Select.ar(djFilterType, [classicR, dfm1R]),
 				sigR
 			]);
             
@@ -499,12 +521,11 @@ Engine_Ncoco : CroneEngine {
         // PARAMS -> OUT
 		this.addCommand("filtL", "f", { |msg| synth_out.set(\filtL, msg[1]) });
 		this.addCommand("filtR", "f", { |msg| synth_out.set(\filtR, msg[1]) });
-		this.addCommand("ampL", "f", { |msg| synth_out.set(\ampL, msg[1]) });
-		this.addCommand("ampR", "f", { |msg| synth_out.set(\ampR, msg[1]) });
 		this.addCommand("panL", "f", { |msg| synth_out.set(\panL, msg[1]) });
 		this.addCommand("panR", "f", { |msg| synth_out.set(\panR, msg[1]) });
 		this.addCommand("monitorLevel", "f", { |msg| synth_out.set(\monitorLevel, msg[1]) });
-        this.addCommand("bleedPost", "f", { |msg| synth_out.set(\bleedPost, msg[1]) }); // [NEW]
+        this.addCommand("bleedPost", "f", { |msg| synth_out.set(\bleedPost, msg[1]) });
+        this.addCommand("dj_filter_type", "f", { |msg| synth_out.set(\djFilterType, msg[1]) }); // [v2.04]
 
         // PARAMS -> BOTH (Amp controls visual in Core and audio in Out)
         this.addCommand("ampL", "f", { |msg| 
