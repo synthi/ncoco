@@ -1,12 +1,12 @@
 // Engine_Ncoco.sc v2.07
 // CHANGELOG v2.07:
-// 1. RENAME: "DFM1" → "Analog" in labels/defaults.
-// 2. NEW: Feedback Filter param (Classic/Analog) — Analog uses DFM1 1-pole with 0.22 gain.
+// 1. RENAME: "DFM1" renamed to "Analog" in labels/defaults.
+// 2. NEW: Feedback Filter param (Classic/Analog) - Analog uses DFM1 1-pole with 0.22 gain.
 // 3. TWEAK: Component tolerances L vs R (noise, jitter, bleed, filter freq, input HPF).
 // 4. TWEAK: DJ Filter default Analog, gain 0.32.
 // CHANGELOG v2.06:
 // 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
-// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes — 15kHz max, closes properly.
+// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes - 15kHz max, closes properly.
 // CHANGELOG v2.04:
 // 1. ENHANCEMENT: DJ Filter now has DFM1 option (menu param, default=Classic).
 // 2. FIX: Removed dead ampL/ampR commands (overwritten by "both" commands below).
@@ -412,7 +412,7 @@ Engine_Ncoco : CroneEngine {
             classicL = HPF.ar(LPF.ar(sigL, lpfFreqL), hpfFreqL);
             classicR = HPF.ar(LPF.ar(sigR, lpfFreqR), hpfFreqR);
 
-            // [v2.06] DFM1 path: LPF×2 (pre-attenuated) + HPF always Classic
+// [v2.06] DFM1 path: LPF x2 (pre-attenuated) + HPF always Classic
             // L channel
             dfm1L = DFM1.ar(sigL * 0.7, lpfFreqL, 0, 1.0, 0, 0.0003);  // LPF stage 1 (pre-atten -3dB)
             dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);       // LPF stage 2
