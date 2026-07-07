@@ -396,12 +396,12 @@ Engine_Ncoco : CroneEngine {
 			nsFbR = Select.ar(Select.ar(isUlawR, [adpcmNSR, ulawNSR]), [DC.ar(0), nsErrorR * 0.5, (nsErrorR * 1.0) - (nsError2R * 0.25)]);
 			
 			// PATH 1: Linear
-			writeQL = writeL.round(0.5 ** quantBitsL);
-			writeQR = writeR.round(0.5 ** quantBitsR);
+			writeQL = writeL.round(0.5.pow(quantBitsL));
+			writeQR = writeR.round(0.5.pow(quantBitsR));
 			
 			// PATH 2: u-law with TPDF dither
-			ulawDitherSigL = Select.ar(ulawDitherL, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5 ** 9) * 0.5]);
-			ulawDitherSigR = Select.ar(ulawDitherR, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5 ** 9) * 0.5]);
+			ulawDitherSigL = Select.ar(ulawDitherL, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5.pow(9)) * 0.5]);
+			ulawDitherSigR = Select.ar(ulawDitherR, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5.pow(9)) * 0.5]);
 			ulawInL = writeL + nsFbL + ulawDitherSigL;
 			ulawInR = writeR + nsFbR + ulawDitherSigR;
 			compandedL = (ulawInL.sign * ((1 + 255 * ulawInL.abs).log / 256.log)).clip(-1, 1);
@@ -410,8 +410,8 @@ Engine_Ncoco : CroneEngine {
 			qCompR = (compandedR * 127 + 127).round(1).clip(0, 255);
 			ulawIdxL = (qCompL - 127) / 127;
 			ulawIdxR = (qCompR - 127) / 127;
-			ulawExpL = ulawIdxL.sign * ((256 ** ulawIdxL.abs - 1) / 255);
-			ulawExpR = ulawIdxR.sign * ((256 ** ulawIdxR.abs - 1) / 255);
+			ulawExpL = ulawIdxL.sign * ((256.pow(ulawIdxL.abs) - 1) / 255);
+			ulawExpR = ulawIdxR.sign * ((256.pow(ulawIdxR.abs) - 1) / 255);
 			
 			// PATH 3: ADPCM with predictor + G.726 leaky step
 			adpcmPredValL = Select.ar(adpcmPredL, [adpcmStateL1, (2 * adpcmStateL1) - adpcmStateL2]);
@@ -424,8 +424,8 @@ Engine_Ncoco : CroneEngine {
 			adpcmDitherSigR = Select.ar(adpcmDitherR, [DC.ar(0), WhiteNoise.ar(adpcmStepStateR * 0.5)]);
 			adpcmDiffL = writeL + nsFbL + adpcmDitherSigL - adpcmPredValL;
 			adpcmDiffR = writeR + nsFbR + adpcmDitherSigR - adpcmPredValR;
-			adpcmQDiffL = (adpcmDiffL / adpcmStepStateL.max(0.0001)).round(0.5 ** adpcmBitsL) * adpcmStepStateL;
-			adpcmQDiffR = (adpcmDiffR / adpcmStepStateR.max(0.0001)).round(0.5 ** adpcmBitsR) * adpcmStepStateR;
+			adpcmQDiffL = (adpcmDiffL / adpcmStepStateL.max(0.0001)).round(0.5.pow(adpcmBitsL)) * adpcmStepStateL;
+			adpcmQDiffR = (adpcmDiffR / adpcmStepStateR.max(0.0001)).round(0.5.pow(adpcmBitsR)) * adpcmStepStateR;
 			adpcmDecodedL = adpcmPredValL + adpcmQDiffL;
 			adpcmDecodedR = adpcmPredValR + adpcmQDiffR;
 			stepMultL = (adpcmQDiffL.abs / adpcmStepStateL.max(0.0001)).clip(0, 10) * 0.3 + 0.8;
@@ -434,8 +434,8 @@ Engine_Ncoco : CroneEngine {
 			newStepR = (adpcmStepStateR * 0.98 + (adpcmStepStateR * stepMultR - adpcmStepStateR) * 0.5).clip(stepMinR, stepMaxR);
 			
 			// SELECT FINAL PATH
-			writeQL = Select.ar(isUlawL, [Select.ar(isAdpcmL, [writeL.round(0.5 ** quantBitsL), adpcmDecodedL]), ulawExpL]);
-			writeQR = Select.ar(isUlawR, [Select.ar(isAdpcmR, [writeR.round(0.5 ** quantBitsR), adpcmDecodedR]), ulawExpR]);
+			writeQL = Select.ar(isUlawL, [Select.ar(isAdpcmL, [writeL.round(0.5.pow(quantBitsL)), adpcmDecodedL]), ulawExpL]);
+			writeQR = Select.ar(isUlawR, [Select.ar(isAdpcmR, [writeR.round(0.5.pow(quantBitsR)), adpcmDecodedR]), ulawExpR]);
 			
 			// SR REDUCTION
 			writeQL = Select.ar(is8L + isUlawL + isAdpcmL, [writeQL, Latch.ar(writeQL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmtL))))]);
