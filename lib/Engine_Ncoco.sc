@@ -119,7 +119,7 @@ Engine_Ncoco : CroneEngine {
 			var p1, p2, p3, p4, p5, p6, c1, c2, c3, c4, c5, c6; 
 			var b_ph1, b_ph2, b_ph3, b_ph4, b_ph5, b_ph6, t1, t2, t3, t4, t5, t6; 
 			var out1, out2, out3, out4, out5, out6, sources_sig; 
-            var p1c, p2c, p3c, p4c, p5c, p6c;
+			var p1c, p2c, p3c, p4c, p5c, p6c;
 			
 			var raw_mod_flipL, raw_mod_flipR, mod_val_flipL, mod_val_flipR;
 			var raw_mod_skipL, raw_mod_skipR, mod_val_skipL, mod_val_skipR;
@@ -141,12 +141,12 @@ Engine_Ncoco : CroneEngine {
 			var minTime, maxTime, lowerL, upperL, lowerR, upperR;
 			var demandL, demandR, autoTrigL, autoTrigR, finalJumpTrigL, finalJumpTrigR;
 			var resetPosL, resetPosR, jitterAmountL, jitterAmountR;
-            var clean_preampL, clean_preampR;
-            var relInL, relInR, atkInL, atkInR; 
-            var relCoL, relCoR, atkCoL, atkCoR; 
-            var envFbL, envFbR;
-            var src11_ar, src12_ar; 
-            var fb_src11, fb_src12; 
+			var clean_preampL, clean_preampR;
+			var relInL, relInR, atkInL, atkInR; 
+			var relCoL, relCoR, atkCoL, atkCoR; 
+			var envFbL, envFbR;
+			var src11_ar, src12_ar; 
+			var fb_src11, fb_src12; 
 			var bleedAmpL, bleedAmpR;
 			// [v2.08]
 			var bdIntL, bdIntR;
@@ -450,11 +450,11 @@ Engine_Ncoco : CroneEngine {
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
             // BRIDGE: OUTPUT TO BUSES
-            Out.ar(bus_tape_out, [readL, readR]);
-            Out.ar(bus_mon_out, [clean_preampL + mod_val_audioInL, clean_preampR + mod_val_audioInR]);
-            Out.ar(bus_bleed_out, [bleedL, bleedR]); // [NEW] Send Bleed separately
-            Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]);
-            Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]);
+			Out.ar(bus_tape_out, [readL, readR]);
+			Out.ar(bus_mon_out, [clean_preampL + mod_val_audioInL, clean_preampR + mod_val_audioInR]);
+			Out.ar(bus_bleed_out, [bleedL, bleedR]); // [NEW] Send Bleed separately
+			Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]);
+			Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]);
 
 		}).add;
 
@@ -470,16 +470,16 @@ Engine_Ncoco : CroneEngine {
             dfm1Gain=0.15; // [v2.06] DFM1 gain compensation (2-stage LPF cascade, real-time adjustable)
 
             // --- VARS (ALL DECLARED AT TOP) ---
-            var readL, readR, monL, monR, bleedL, bleedR;
-            var mod_vol, mod_filt;
-            var mod_val_volL, mod_val_volR, mod_val_filtL, mod_val_filtR;
-            var totalFiltL, totalFiltR;
-            var lpfFreqL, hpfFreqL, lpfFreqR, hpfFreqR;
-            var classicL, classicR, dfm1L, dfm1R;
-            var finalVolL, finalVolR;
-            var master_out;
-            var tape_in, mon_in, bleed_in;
-            var sigL, sigR;
+			var readL, readR, monL, monR, bleedL, bleedR;
+			var mod_vol, mod_filt;
+			var mod_val_volL, mod_val_volR, mod_val_filtL, mod_val_filtR;
+			var totalFiltL, totalFiltR;
+			var lpfFreqL, hpfFreqL, lpfFreqR, hpfFreqR;
+			var classicL, classicR, dfm1L, dfm1R;
+			var finalVolL, finalVolR;
+			var master_out;
+			var tape_in, mon_in, bleed_in;
+			var sigL, sigR;
 
             // --- CODE BODY ---
             tape_in = In.ar(bus_tape_in, 2);
@@ -545,7 +545,7 @@ Engine_Ncoco : CroneEngine {
             
 			master_out = Pan2.ar(sigL*finalVolL, panL) + Pan2.ar(sigR*finalVolR, panR);
             
-            Out.ar(out, Limiter.ar(master_out + [monL * monitorLevel, monR * monitorLevel], 0.95)); 
+			Out.ar(out, Limiter.ar(master_out + [monL * monitorLevel, monR * monitorLevel], 0.95)); 
         }).add;
 
 		// BARRIER 2
