@@ -1,10 +1,12 @@
 // Engine_Ncoco.sc v2.08
 // CHANGELOG v2.08:
-// 1. NEW: 5th bit-depth mode "ADPCM" (delta modulation).
+// 1. NEW: 5th bit-depth mode "ADPCM" (G.726 leaky step adaptation).
 // 2. NEW: 4th bit-depth mode "u-law" (8-bit companded).
 // 3. NEW: Dither (TPDF on u-law, adaptive on ADPCM) per channel.
-// 4. NEW: Select.ar tables indexed by bdInt for noise/SR/filt/etc.
-// 5. NEW: Sub-params encoded inside bitDepthL/bitDepthR (zero new commands).
+// 4. NEW: Noise Shaping (1st/2nd Order) with LocalIn state tracking.
+// 5. NEW: Encode sub-params inside bitDepthL/bitDepthR (zero new commands).
+// 6. ARCH: Expanded LocalIn/LocalOut from 10 to 20 channels (NS + ADPCM state).
+// 7. OPT: Select.ar tables (indexed by bdInt) replace if/else chain.
 // CHANGELOG v2.06:
 // CHANGELOG v2.06:
 // 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
@@ -146,8 +148,8 @@ Engine_Ncoco : CroneEngine {
             var envFbL, envFbR;
             var src11_ar, src12_ar; 
             var fb_src11, fb_src12; 
-
-			// [v2.08] Variables for u-law, ADPCM
+			var bleedAmpL, bleedAmpR;
+			// [v2.08]
 			var bdIntL, bdIntR;
 			var is16L, is16R, isUlawL, isUlawR, isAdpcmL, isAdpcmR;
 			var ulawFracL, ulawFracR, ulawDitherL, ulawDitherR, ulawNSL, ulawNSR;
@@ -162,19 +164,34 @@ Engine_Ncoco : CroneEngine {
 			var ulawDitherSigL, ulawDitherSigR;
 			var ulawInL, ulawInR, compandedL, compandedR, qCompL, qCompR;
 			var ulawExpL, ulawExpR, ulawIdxL, ulawIdxR;
+			var adpcmPredValL, adpcmPredValR;
 			var adpcmDiffL, adpcmDiffR, adpcmQDiffL, adpcmQDiffR;
 			var adpcmDecodedL, adpcmDecodedR;
-			var stepBaseL, stepBaseR;
+			var stepBaseL, stepBaseR, stepMinL, stepMinR, stepMaxL, stepMaxR;
+			var newStepL, newStepR, stepMultL, stepMultR;
 			var adpcmDitherSigL, adpcmDitherSigR;
 			var writeQL, writeQR;
+			var nsErrorL, nsError2L, nsErrorR, nsError2R;
+			var nsFbL, nsFbR;
+			var adpcmStateL1, adpcmStateL2, adpcmStepStateL;
+			var adpcmStateR1, adpcmStateR2, adpcmStepStateR;
+
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(10);
+            feedback_in = LocalIn.ar(20);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
             fb_src11 = feedback_in[8];
             fb_src12 = feedback_in[9];
+			// [v2.08] Noise Shaping state
+			nsErrorL = feedback_in[10]; nsError2L = feedback_in[11];
+			nsErrorR = feedback_in[12]; nsError2R = feedback_in[13];
+			// [v2.08] ADPCM state (persistent predictor + step)
+			adpcmStateL1 = feedback_in[14]; adpcmStateL2 = feedback_in[15];
+			adpcmStepStateL = max(feedback_in[16], 0.0001);
+			adpcmStateR1 = feedback_in[17]; adpcmStateR2 = feedback_in[18];
+			adpcmStepStateR = max(feedback_in[19], 0.0001);
 
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
@@ -193,7 +210,7 @@ Engine_Ncoco : CroneEngine {
             clean_preampL = inputL_sig; clean_preampR = inputR_sig;
 
 			// [v2.08] MODE DETECTION
-			bdIntL = trunc(bitDepthL); bdIntR = trunc(bitDepthR);
+			bdIntL = bitDepthL.trunc; bdIntR = bitDepthR.trunc;
 			is8L = bdIntL == 8; is8R = bdIntR == 8;
 			is12L = bdIntL == 12; is12R = bdIntR == 12;
 			is16L = bdIntL >= 14; is16R = bdIntR >= 14;
@@ -202,23 +219,26 @@ Engine_Ncoco : CroneEngine {
 			// u-law sub-params
 			ulawFracL = isUlawL * (bitDepthL - 6);
 			ulawFracR = isUlawR * (bitDepthR - 6);
-			ulawDitherL = trunc(ulawFracL * 10 + 0.0001);
-			ulawDitherR = trunc(ulawFracR * 10 + 0.0001);
-			ulawNSL = trunc(ulawFracL * 100 + 0.0001) % 10;
-			ulawNSR = trunc(ulawFracR * 100 + 0.0001) % 10;
+			ulawDitherL = (ulawFracL * 10 + 0.0001).trunc;
+			ulawDitherR = (ulawFracR * 10 + 0.0001).trunc;
+			ulawNSL = ((ulawFracL * 100 + 0.0001).trunc) % 10;
+			ulawNSR = ((ulawFracR * 100 + 0.0001).trunc) % 10;
 			// ADPCM sub-params
 			adpcmFracL = isAdpcmL * (bitDepthL - 7);
 			adpcmFracR = isAdpcmR * (bitDepthR - 7);
-			adpcmBitsL = trunc(adpcmFracL * 100 + 0.0001);
-			adpcmBitsR = trunc(adpcmFracR * 100 + 0.0001);
-			adpcmDitherL = trunc(adpcmFracL * 10000 + 0.0001) % 10;
-			adpcmDitherR = trunc(adpcmFracR * 10000 + 0.0001) % 10;
-			// Select.ar tables indexed by bdInt
+			adpcmBitsL = (adpcmFracL * 100 + 0.0001).trunc;
+			adpcmBitsR = (adpcmFracR * 100 + 0.0001).trunc;
+			adpcmPredL = ((adpcmFracL * 1000 + 0.0001).trunc) % 10;
+			adpcmPredR = ((adpcmFracR * 1000 + 0.0001).trunc) % 10;
+			adpcmDitherL = ((adpcmFracL * 10000 + 0.0001).trunc) % 10;
+			adpcmDitherR = ((adpcmFracR * 10000 + 0.0001).trunc) % 10;
+			adpcmNSL = ((adpcmFracL * 100000 + 0.0001).trunc) % 10;
+			adpcmNSR = ((adpcmFracR * 100000 + 0.0001).trunc) % 10;
+			// Select.ar tables
 			noiseL = PinkNoise.ar(Select.ar(bdIntL, [0,0,0,0,0,0, 0.006,0.003, 0.008,0,0,0, 0.0016,0,0,0, 0.00016]));
 			noiseR = PinkNoise.ar(Select.ar(bdIntR, [0,0,0,0,0,0, 0.006,0.003, 0.008,0,0,0, 0.0016,0,0,0, 0.00016]));
 			baseSR_L = Select.ar(bdIntL, [0,0,0,0,0,0, 22000,0, 16000,0,0,0, 31250,0,0,0, 39000]);
 			baseSR_R = (Select.ar(bdIntR, [0,0,0,0,0,0, 22000,0, 16000,0,0,0, 31250,0,0,0, 39000])) * 1.002;
-			// ADPCM SR override
 			adpcmSR_L = Select.ar(adpcmBitsL - 4, [14000, 16000, 16000]);
 			adpcmSR_R = Select.ar(adpcmBitsR - 4, [14000, 16000, 16000]);
 			baseSR_L = Select.ar(isAdpcmL, [baseSR_L, adpcmSR_L]);
@@ -231,12 +251,15 @@ Engine_Ncoco : CroneEngine {
 			jitterAmtR = Select.ar(bdIntR, [0,0,0,0,0,0, 0.02,0.015, 0.02,0,0,0, 0.004,0,0,0, 0.001]);
 			bleedAmtL = Select.ar(bdIntL, [0,0,0,0,0,0, 0.002,0.0015, 0.0025,0,0,0, 0.001,0,0,0, 0]);
 			bleedAmtR = Select.ar(bdIntR, [0,0,0,0,0,0, 0.002,0.0015, 0.0025,0,0,0, 0.001,0,0,0, 0]);
-			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
             inputR_sig = inputR_sig + (noiseR * 0.5);
+			yellowL = DC.ar(0); yellowR = DC.ar(0);
+
+			inputL_sig = inputL_sig + (noiseL * 0.5);
+			inputR_sig = inputR_sig + (noiseR * 0.5);
 
 			yellowL = DC.ar(0); yellowR = DC.ar(0);
-            
+			
             sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1], fb_src11, fb_src12];
 
             p1c = (p1chaos + globalChaos).clip(0, 1); p2c = (p2chaos + globalChaos).clip(0, 1);
@@ -315,8 +338,9 @@ Engine_Ncoco : CroneEngine {
 			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
             // Bleed Logic
-			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmtL;
-			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmtR;
+			// Bleed amounts already set via Select.ar tables above
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmpL;
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmpR;
 
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
@@ -371,14 +395,20 @@ Engine_Ncoco : CroneEngine {
 			// [v2.08] QUANTIZATION ENGINE
 			quantBitsL = Select.ar(bdIntL, [0,0,0,0,0,0, 8,0, 8,0,0,0, 12,0,0,0, 16]);
 			quantBitsR = Select.ar(bdIntR, [0,0,0,0,0,0, 8,0, 8,0,0,0, 12,0,0,0, 16]);
+
+			// Noise Shaping feedback (1st Order: prev*0.5, 2nd Order: prev*1.0 - prev2*0.25)
+			nsFbL = Select.ar(Select.ar(isUlawL, [adpcmNSL, ulawNSL]), [DC.ar(0), nsErrorL * 0.5, (nsErrorL * 1.0) - (nsError2L * 0.25)]);
+			nsFbR = Select.ar(Select.ar(isUlawR, [adpcmNSR, ulawNSR]), [DC.ar(0), nsErrorR * 0.5, (nsErrorR * 1.0) - (nsError2R * 0.25)]);
+
 			// PATH 1: Linear
 			writeQL = writeL.round(0.5 ** quantBitsL);
 			writeQR = writeR.round(0.5 ** quantBitsR);
+
 			// PATH 2: u-law with TPDF dither
 			ulawDitherSigL = Select.ar(ulawDitherL, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5 ** 9) * 0.5]);
 			ulawDitherSigR = Select.ar(ulawDitherR, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5 ** 9) * 0.5]);
-			ulawInL = writeL + ulawDitherSigL;
-			ulawInR = writeR + ulawDitherSigR;
+			ulawInL = writeL + nsFbL + ulawDitherSigL;
+			ulawInR = writeR + nsFbR + ulawDitherSigR;
 			compandedL = (ulawInL.sign * ((1 + 255 * ulawInL.abs).log / 256.log)).clip(-1, 1);
 			compandedR = (ulawInR.sign * ((1 + 255 * ulawInR.abs).log / 256.log)).clip(-1, 1);
 			qCompL = (compandedL * 127 + 127).round(1).clip(0, 255);
@@ -387,27 +417,45 @@ Engine_Ncoco : CroneEngine {
 			ulawIdxR = (qCompR - 127) / 127;
 			ulawExpL = ulawIdxL.sign * ((256 ** ulawIdxL.abs - 1) / 255);
 			ulawExpR = ulawIdxR.sign * ((256 ** ulawIdxR.abs - 1) / 255);
-			// PATH 3: ADPCM (delta modulation)
+
+			// PATH 3: ADPCM with predictor + G.726 leaky step
+			// Predictor (1st Order: prev, 2nd Order: 2*prev - prev2)
+			adpcmPredValL = Select.ar(adpcmPredL, [adpcmStateL1, (2 * adpcmStateL1) - adpcmStateL2]);
+			adpcmPredValR = Select.ar(adpcmPredR, [adpcmStateR1, (2 * adpcmStateR1) - adpcmStateR2]);
+			// Step-size base
 			stepBaseL = Select.ar(adpcmBitsL - 4, [0.05, 0.025, 0.0125]);
 			stepBaseR = Select.ar(adpcmBitsR - 4, [0.05, 0.025, 0.0125]);
-			adpcmDitherSigL = Select.ar(adpcmDitherL, [DC.ar(0), WhiteNoise.ar(stepBaseL * 0.5)]);
-			adpcmDitherSigR = Select.ar(adpcmDitherR, [DC.ar(0), WhiteNoise.ar(stepBaseR * 0.5)]);
-			adpcmDiffL = writeL + adpcmDitherSigL;
-			adpcmDiffR = writeR + adpcmDitherSigR;
-			adpcmQDiffL = (adpcmDiffL / stepBaseL.max(0.0001)).round(0.5 ** adpcmBitsL) * stepBaseL;
-			adpcmQDiffR = (adpcmDiffR / stepBaseR.max(0.0001)).round(0.5 ** adpcmBitsR) * stepBaseR;
-			adpcmDecodedL = adpcmQDiffL;
-			adpcmDecodedR = adpcmQDiffR;
+			stepMinL = stepBaseL * 0.1; stepMinR = stepBaseR * 0.1;
+			stepMaxL = stepBaseL * 10; stepMaxR = stepBaseR * 10;
+			// Adaptive dither (step-weighted)
+			adpcmDitherSigL = Select.ar(adpcmDitherL, [DC.ar(0), WhiteNoise.ar(adpcmStepStateL * 0.5)]);
+			adpcmDitherSigR = Select.ar(adpcmDitherR, [DC.ar(0), WhiteNoise.ar(adpcmStepStateR * 0.5)]);
+			// ADPCM encode: diff = signal + nsFb + dither - predictor
+			adpcmDiffL = writeL + nsFbL + adpcmDitherSigL - adpcmPredValL;
+			adpcmDiffR = writeR + nsFbR + adpcmDitherSigR - adpcmPredValR;
+			// Quantize diff with current step-size
+			adpcmQDiffL = (adpcmDiffL / adpcmStepStateL.max(0.0001)).round(0.5 ** adpcmBitsL) * adpcmStepStateL;
+			adpcmQDiffR = (adpcmDiffR / adpcmStepStateR.max(0.0001)).round(0.5 ** adpcmBitsR) * adpcmStepStateR;
+			// ADPCM decode
+			adpcmDecodedL = adpcmPredValL + adpcmQDiffL;
+			adpcmDecodedR = adpcmPredValR + adpcmQDiffR;
+			// G.726 leaky step adaptation
+			stepMultL = (adpcmQDiffL.abs / adpcmStepStateL.max(0.0001)).clip(0, 10) * 0.3 + 0.8;
+			stepMultR = (adpcmQDiffR.abs / adpcmStepStateR.max(0.0001)).clip(0, 10) * 0.3 + 0.8;
+			newStepL = (adpcmStepStateL * 0.98 + (adpcmStepStateL * stepMultL - adpcmStepStateL) * 0.5).clip(stepMinL, stepMaxL);
+			newStepR = (adpcmStepStateR * 0.98 + (adpcmStepStateR * stepMultR - adpcmStepStateR) * 0.5).clip(stepMinR, stepMaxR);
+
 			// SELECT FINAL PATH
 			writeQL = Select.ar(isUlawL, [Select.ar(isAdpcmL, [writeL.round(0.5 ** quantBitsL), adpcmDecodedL]), ulawExpL]);
 			writeQR = Select.ar(isUlawR, [Select.ar(isAdpcmR, [writeR.round(0.5 ** quantBitsR), adpcmDecodedR]), ulawExpR]);
+
 			// SR REDUCTION
 			writeQL = Select.ar(is8L + isUlawL + isAdpcmL, [writeQL, Latch.ar(writeQL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmtL))))]);
 			writeQR = Select.ar(is8R + isUlawR + isAdpcmR, [writeQR, Latch.ar(writeQR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmtR))))]);
-			
-			BufWr.ar(writeQL, bufL, ptrL); BufWr.ar(writeQR, bufR, ptrR);
 
-			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar,
+				nsErrorL, nsError2L, nsErrorR, nsError2R,
+				adpcmDecodedL, adpcmDecodedR, newStepL, newStepR, adpcmStateL1, adpcmStateR1]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
