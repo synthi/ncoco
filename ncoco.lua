@@ -1,4 +1,4 @@
--- ncoco.lua v2.03
+-- ncoco.lua v2.08
 -- CHANGELOG v2.03:
 -- 1. FIX: Added math.randomseed() for random petal seeds at script start.
 -- 2. FIX: Replaced recursive copy_table with shallow copy for safety.
@@ -422,7 +422,7 @@ function init()
     clock_ids[5] = cid_16n
     
     G.loaded = true 
-    print("Ncoco v2.03 Ready.")
+    print("Ncoco v2.08 Ready.")
   end)
 end
 
