@@ -1,4 +1,4 @@
-// Engine_Ncoco.sc v2.08
+/// Engine_Ncoco.sc v2.08
 // CHANGELOG v2.08:
 // 1. NEW: 5th bit-depth mode "ADPCM" (G.726 leaky step adaptation).
 // 2. NEW: 4th bit-depth mode "u-law" (8-bit companded).
@@ -7,7 +7,6 @@
 // 5. NEW: Encode sub-params inside bitDepthL/bitDepthR (zero new commands).
 // 6. ARCH: Expanded LocalIn/LocalOut from 10 to 20 channels (NS + ADPCM state).
 // 7. OPT: Select.ar tables (indexed by bdInt) replace if/else chain.
-// CHANGELOG v2.06:
 // CHANGELOG v2.06:
 // 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
 // 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes — 15kHz max, closes properly.
@@ -176,10 +175,9 @@ Engine_Ncoco : CroneEngine {
 			var adpcmStateL1, adpcmStateL2, adpcmStepStateL;
 			var adpcmStateR1, adpcmStateR2, adpcmStepStateR;
 
-
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(20);
+			feedback_in = LocalIn.ar(20); // [v2.08] Expanded for NS + ADPCM state
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
             fb_src11 = feedback_in[8];
@@ -251,15 +249,12 @@ Engine_Ncoco : CroneEngine {
 			jitterAmtR = Select.ar(bdIntR, [0,0,0,0,0,0, 0.02,0.015, 0.02,0,0,0, 0.004,0,0,0, 0.001]);
 			bleedAmtL = Select.ar(bdIntL, [0,0,0,0,0,0, 0.002,0.0015, 0.0025,0,0,0, 0.001,0,0,0, 0]);
 			bleedAmtR = Select.ar(bdIntR, [0,0,0,0,0,0, 0.002,0.0015, 0.0025,0,0,0, 0.001,0,0,0, 0]);
-            inputL_sig = inputL_sig + (noiseL * 0.5); 
-            inputR_sig = inputR_sig + (noiseR * 0.5);
-			yellowL = DC.ar(0); yellowR = DC.ar(0);
-
-			inputL_sig = inputL_sig + (noiseL * 0.5);
+			
+			inputL_sig = inputL_sig + (noiseL * 0.5); 
 			inputR_sig = inputR_sig + (noiseR * 0.5);
 
 			yellowL = DC.ar(0); yellowR = DC.ar(0);
-			
+            
             sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1], fb_src11, fb_src12];
 
             p1c = (p1chaos + globalChaos).clip(0, 1); p2c = (p2chaos + globalChaos).clip(0, 1);
@@ -339,8 +334,8 @@ Engine_Ncoco : CroneEngine {
 			
             // Bleed Logic
 			// Bleed amounts already set via Select.ar tables above
-			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmpL;
-			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmpR;
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmtL;
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmtR;
 
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
@@ -395,15 +390,15 @@ Engine_Ncoco : CroneEngine {
 			// [v2.08] QUANTIZATION ENGINE
 			quantBitsL = Select.ar(bdIntL, [0,0,0,0,0,0, 8,0, 8,0,0,0, 12,0,0,0, 16]);
 			quantBitsR = Select.ar(bdIntR, [0,0,0,0,0,0, 8,0, 8,0,0,0, 12,0,0,0, 16]);
-
-			// Noise Shaping feedback (1st Order: prev*0.5, 2nd Order: prev*1.0 - prev2*0.25)
+			
+			// Noise Shaping feedback
 			nsFbL = Select.ar(Select.ar(isUlawL, [adpcmNSL, ulawNSL]), [DC.ar(0), nsErrorL * 0.5, (nsErrorL * 1.0) - (nsError2L * 0.25)]);
 			nsFbR = Select.ar(Select.ar(isUlawR, [adpcmNSR, ulawNSR]), [DC.ar(0), nsErrorR * 0.5, (nsErrorR * 1.0) - (nsError2R * 0.25)]);
-
+			
 			// PATH 1: Linear
 			writeQL = writeL.round(0.5 ** quantBitsL);
 			writeQR = writeR.round(0.5 ** quantBitsR);
-
+			
 			// PATH 2: u-law with TPDF dither
 			ulawDitherSigL = Select.ar(ulawDitherL, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5 ** 9) * 0.5]);
 			ulawDitherSigR = Select.ar(ulawDitherR, [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5 ** 9) * 0.5]);
@@ -417,41 +412,36 @@ Engine_Ncoco : CroneEngine {
 			ulawIdxR = (qCompR - 127) / 127;
 			ulawExpL = ulawIdxL.sign * ((256 ** ulawIdxL.abs - 1) / 255);
 			ulawExpR = ulawIdxR.sign * ((256 ** ulawIdxR.abs - 1) / 255);
-
+			
 			// PATH 3: ADPCM with predictor + G.726 leaky step
-			// Predictor (1st Order: prev, 2nd Order: 2*prev - prev2)
 			adpcmPredValL = Select.ar(adpcmPredL, [adpcmStateL1, (2 * adpcmStateL1) - adpcmStateL2]);
 			adpcmPredValR = Select.ar(adpcmPredR, [adpcmStateR1, (2 * adpcmStateR1) - adpcmStateR2]);
-			// Step-size base
 			stepBaseL = Select.ar(adpcmBitsL - 4, [0.05, 0.025, 0.0125]);
 			stepBaseR = Select.ar(adpcmBitsR - 4, [0.05, 0.025, 0.0125]);
 			stepMinL = stepBaseL * 0.1; stepMinR = stepBaseR * 0.1;
 			stepMaxL = stepBaseL * 10; stepMaxR = stepBaseR * 10;
-			// Adaptive dither (step-weighted)
 			adpcmDitherSigL = Select.ar(adpcmDitherL, [DC.ar(0), WhiteNoise.ar(adpcmStepStateL * 0.5)]);
 			adpcmDitherSigR = Select.ar(adpcmDitherR, [DC.ar(0), WhiteNoise.ar(adpcmStepStateR * 0.5)]);
-			// ADPCM encode: diff = signal + nsFb + dither - predictor
 			adpcmDiffL = writeL + nsFbL + adpcmDitherSigL - adpcmPredValL;
 			adpcmDiffR = writeR + nsFbR + adpcmDitherSigR - adpcmPredValR;
-			// Quantize diff with current step-size
 			adpcmQDiffL = (adpcmDiffL / adpcmStepStateL.max(0.0001)).round(0.5 ** adpcmBitsL) * adpcmStepStateL;
 			adpcmQDiffR = (adpcmDiffR / adpcmStepStateR.max(0.0001)).round(0.5 ** adpcmBitsR) * adpcmStepStateR;
-			// ADPCM decode
 			adpcmDecodedL = adpcmPredValL + adpcmQDiffL;
 			adpcmDecodedR = adpcmPredValR + adpcmQDiffR;
-			// G.726 leaky step adaptation
 			stepMultL = (adpcmQDiffL.abs / adpcmStepStateL.max(0.0001)).clip(0, 10) * 0.3 + 0.8;
 			stepMultR = (adpcmQDiffR.abs / adpcmStepStateR.max(0.0001)).clip(0, 10) * 0.3 + 0.8;
 			newStepL = (adpcmStepStateL * 0.98 + (adpcmStepStateL * stepMultL - adpcmStepStateL) * 0.5).clip(stepMinL, stepMaxL);
 			newStepR = (adpcmStepStateR * 0.98 + (adpcmStepStateR * stepMultR - adpcmStepStateR) * 0.5).clip(stepMinR, stepMaxR);
-
+			
 			// SELECT FINAL PATH
 			writeQL = Select.ar(isUlawL, [Select.ar(isAdpcmL, [writeL.round(0.5 ** quantBitsL), adpcmDecodedL]), ulawExpL]);
 			writeQR = Select.ar(isUlawR, [Select.ar(isAdpcmR, [writeR.round(0.5 ** quantBitsR), adpcmDecodedR]), ulawExpR]);
-
+			
 			// SR REDUCTION
 			writeQL = Select.ar(is8L + isUlawL + isAdpcmL, [writeQL, Latch.ar(writeQL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmtL))))]);
 			writeQR = Select.ar(is8R + isUlawR + isAdpcmR, [writeQR, Latch.ar(writeQR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmtR))))]);
+			
+			BufWr.ar(writeQL, bufL, ptrL); BufWr.ar(writeQR, bufR, ptrR);
 
 			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar,
 				nsErrorL, nsError2L, nsErrorR, nsError2R,
