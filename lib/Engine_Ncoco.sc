@@ -136,6 +136,7 @@ Engine_Ncoco : CroneEngine {
 			// ADPCM state vars (persisted via LocalIn/Out channels 10-13)
 			var adpcmStepL, adpcmPredL, adpcmDiffL, adpcmQuantL, adpcmReconL, adpcmNewStepL, adpcmNewPredL;
 			var adpcmStepR, adpcmPredR, adpcmDiffR, adpcmQuantR, adpcmReconR, adpcmNewStepR, adpcmNewPredR;
+			var isAdpcmL, isAdpcmR;
 
 			// --- CORE DSP ---
 			
@@ -347,8 +348,8 @@ Engine_Ncoco : CroneEngine {
 			
 			// ADPCM processing (only active when mode==4)
 			// isAdpcm = 1 when mode==4, else 0
-			var isAdpcmL = (modeL == 4).asInteger;
-			var isAdpcmR = (modeR == 4).asInteger;
+			isAdpcmL = (modeL == 4).asInteger;
+			isAdpcmR = (modeR == 4).asInteger;
 
 			// L channel ADPCM
 			adpcmStepL = (feedback_in[10] * isAdpcmL).max(1);
