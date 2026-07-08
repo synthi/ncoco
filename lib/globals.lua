@@ -1,4 +1,6 @@
--- lib/globals.lua v2.01
+-- lib/globals.lua v2.50
+-- CHANGELOG v2.50:
+-- 1. META: Version bump to 2.50 (project-wide alignment).
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9000:
