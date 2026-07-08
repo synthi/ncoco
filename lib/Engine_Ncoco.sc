@@ -216,10 +216,10 @@ Engine_Ncoco : CroneEngine {
 
 			// [v2.08] MODE DETECTION
 			bdInt[0] = bitDepthL.trunc; bdInt[1] = bitDepthR.trunc;
-			is8L = bdInt[0] == 8; is8R = bdInt[1] == 8;
-			is16[0] = bdInt[0] >= 14; is16[1] = bdInt[1] >= 14;
-			isUlaw[0] = bdInt[0] == 6; isUlaw[1] = bdInt[1] == 6;
-			isAdpcm[0] = bdInt[0] == 7; isAdpcm[1] = bdInt[1] == 7;
+			is8L = (bdInt[0] == 8).asInteger; is8R = (bdInt[1] == 8).asInteger;
+			is16[0] = (bdInt[0] >= 14).asInteger; is16[1] = (bdInt[1] >= 14).asInteger;
+			isUlaw[0] = (bdInt[0] == 6).asInteger; isUlaw[1] = (bdInt[1] == 6).asInteger;
+			isAdpcm[0] = (bdInt[0] == 7).asInteger; isAdpcm[1] = (bdInt[1] == 7).asInteger;
 			// u-law sub-params
 			ulawFrac[0] = isUlaw[0] * (bitDepthL - 6);
 			ulawFrac[1] = isUlaw[1] * (bitDepthR - 6);
