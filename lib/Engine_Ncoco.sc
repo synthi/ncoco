@@ -135,7 +135,7 @@ Engine_Ncoco : CroneEngine {
 			var mod_p1, mod_p2, mod_p3, mod_p4, mod_p5, mod_p6;
 			
 			var dry = [0, 0], finalRate = [0, 0], ptr = [0, 0], read = [0, 0], write = [0, 0];
-			var gateRec = [0, 0], noise = [0, 0], baseSR = [0, 0], interp = [0, 0];
+			var gateRec = [0, 0], noise = [0, 0], baseSR = [0, 0], interpVals = [0, 0];
 			var is8L, is8R;
 			var end = [0, 0], yellow = [0, 0];
 			var drift = [0, 0], bleed = [0, 0], baseSpeed = [0, 0];
@@ -249,8 +249,8 @@ Engine_Ncoco : CroneEngine {
 			baseSR[1] = Select.ar(isAdpcm[1], [baseSR[1], adpcmSR[1]]);
 			fixFilt[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 9000,8000, 7000,0,0,0, 12800,0,0,0, 18000]);
 			fixFilt[1] = (Select.ar(bdInt[1], [0,0,0,0,0,0, 9000,8000, 7000,0,0,0, 12800,0,0,0, 18000])) * 1.04;
-			interp[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 1,1, 1,0,0,0, 2,0,0,0, 3]);
-			interp[1] = Select.ar(bdInt[1], [0,0,0,0,0,0, 1,1, 1,0,0,0, 2,0,0,0, 3]);
+			interpVals[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 1,1, 1,0,0,0, 2,0,0,0, 3]);
+			interpVals[1] = Select.ar(bdInt[1], [0,0,0,0,0,0, 1,1, 1,0,0,0, 2,0,0,0, 3]);
 			jitterAmt[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 0.02,0.015, 0.02,0,0,0, 0.004,0,0,0, 0.001]);
 			jitterAmt[1] = Select.ar(bdInt[1], [0,0,0,0,0,0, 0.02,0.015, 0.02,0,0,0, 0.004,0,0,0, 0.001]);
 			bleedAmt[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 0.002,0.0015, 0.0025,0,0,0, 0.001,0,0,0, 0]);
@@ -343,8 +343,8 @@ Engine_Ncoco : CroneEngine {
 			bleed[0] = SinOsc.ar((baseSR[0] * finalRate[0].abs).clip(20, 20000)) * bleedAmt[0];
 			bleed[1] = SinOsc.ar((baseSR[1] * finalRate[1].abs).clip(20, 20000)) * bleedAmt[1];
 
-			read[0] = BufRd.ar(1, bufL, ptr[0], loop:1, interpolation: interp[0]);
-			read[1] = BufRd.ar(1, bufR, ptr[1], loop:1, interpolation: interp[1]);
+			read[0] = BufRd.ar(1, bufL, ptr[0], loop:1, interpolation: interpVals[0]);
+			read[1] = BufRd.ar(1, bufR, ptr[1], loop:1, interpolation: interpVals[1]);
 			
             // [FIX] Bleed is NOT mixed here anymore. It's sent to Out via b_bleed.
             // read[0] = read[0] + bleed[0] + (noise[0] * 0.5); // OLD
