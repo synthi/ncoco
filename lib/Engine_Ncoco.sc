@@ -1,10 +1,10 @@
 // Engine_Ncoco.sc v2.51
-// CHANGELOG v2.51:
-// 1. FIX: Extensive Select.ar vs Select.kr rate mismatches resolved across entire SynthDef.
-// 2. FIX: Critical ADPCM matrix lookup restored to per-sample Audio Rate using DC.ar arrays, avoiding A2K downsampling destruction.
-// 3. FIX: Removed fatal .asInteger calls on UGens, replaced with pure BinaryOpUGen math.
-// 4. FIX: SendReply.kr OSC payload corrected (proper K2A -> A2K downsampling for trigger broadcast).
-// 5. FIX: Synth 2 DJ Filter routing protected with K2A.ar wrappers.
+// CHANGELOG v2.51 (FORENSIC REBUILD):
+// 1. INTEGRATION: 5 bit-depth modes (8b, 12b, 16b, ulaw, adpcm) built on stable v2.06 architecture.
+// 2. FIX: Strict rate compliance for Select.ar (K2A.ar indices) and Select.kr (scalar arrays).
+// 3. FIX: ADPCM state matrix uses DC.ar arrays to prevent A2K downsampling destruction.
+// 4. FIX: SendReply.kr payload strictly downsampled via A2K.kr to prevent UDP port blocking.
+// 5. FIX: Latent v2.06 Select.ar rate mismatches resolved (djFilterType, skipMode, p1shape).
 
 Engine_Ncoco : CroneEngine {
 	var <synth_core, <synth_out;
@@ -23,9 +23,9 @@ Engine_Ncoco : CroneEngine {
 		bufR = Buffer.alloc(context.server, 48000 * 60, 1);
 		
 		// Internal Interconnects
-		b_tape = Bus.audio(context.server, 2);      // Tape signal (Clean)
-		b_mon = Bus.audio(context.server, 2);       // Monitor signal
-		b_bleed = Bus.audio(context.server, 2);     // Bleed signal isolated
+		b_tape = Bus.audio(context.server, 2);      
+		b_mon = Bus.audio(context.server, 2);       
+		b_bleed = Bus.audio(context.server, 2);     
 		b_mod_vol = Bus.control(context.server, 2); 
 		b_mod_filt = Bus.control(context.server, 2);
 		
@@ -41,14 +41,15 @@ Engine_Ncoco : CroneEngine {
 		// -----------------------------------------------------------
 		SynthDef(\NcocoCore, {
 			arg bufL, bufR, inL, inR,
-			bus_tape_out, bus_mon_out, bus_bleed_out,
+			bus_tape_out, bus_mon_out, bus_bleed_out, 
 			bus_mvol_out, bus_mfilt_out,
 			
 			recL=0, recR=0, fbL=0.85, fbR=0.85, speedL=1.0, speedR=1.0,     
 			flipL=0, flipR=0, skipL=0, skipR=0,           
 			volInL=1.0, volInR=1.0,     
 			
-			loopLenL=8.0, loopLenR=8.0,
+			modeL=0, modeR=0,                   
+            loopLenL=8.0, loopLenR=8.0,
 			
 			skipModeL=0, skipModeR=0, 
 			stutterRateL=0.1, stutterRateR=0.1,
@@ -65,9 +66,8 @@ Engine_Ncoco : CroneEngine {
             globalChaos=0, 
             coco1OutMode=0, coco2OutMode=0, 
             cocoSlewL=0.1, cocoSlewR=0.1,
-            
-            slew_speed=0.1, slew_amp=0.05, slew_misc=0,
-            modeL=0, modeR=0;
+
+			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
 
 			// --- VARS ---
 			var dest_gains = NamedControl.kr(\dest_gains, 1!24); 
@@ -113,6 +113,7 @@ Engine_Ncoco : CroneEngine {
 			
 			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR, readL, readR, writeL, writeR;
 			var gateRecL, gateRecR, noiseL, noiseR, baseSR_L, baseSR_R, interpL, interpR;
+			var fixedFiltFreqL, fixedFiltFreqR;
 			var endL, endR, yellowL, yellowR;
 			var driftL, driftR, bleedL, bleedR, baseSpeedL, baseSpeedR;
 			var flipLogicL, flipLogicR, flipStateL, flipStateR, recLogicL, recLogicR;
@@ -130,14 +131,13 @@ Engine_Ncoco : CroneEngine {
             var fb_src11, fb_src12; 
 			var isNot16BitL, isNot16BitR;
 			
-			// ADPCM state vars
 			var adpcmStepL, adpcmPredL, adpcmDiffL, adpcmQuantL, adpcmReconL, adpcmNewStepL, adpcmNewPredL;
 			var adpcmStepR, adpcmPredR, adpcmDiffR, adpcmQuantR, adpcmReconR, adpcmNewStepR, adpcmNewPredR;
 			var isAdpcmL, isAdpcmR;
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(14); 
+            feedback_in = LocalIn.ar(14);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
             fb_src11 = feedback_in[8];
@@ -159,20 +159,21 @@ Engine_Ncoco : CroneEngine {
 
             clean_preampL = inputL_sig; clean_preampR = inputR_sig;
 
-			// Fixed Select to .kr for scalars
 			noiseL = PinkNoise.ar(Select.kr(modeL, [0.008, 0.0016, 0.00016, 0.004, 0.002]));
 			noiseR = PinkNoise.ar(Select.kr(modeR, [0.008, 0.0016, 0.00016, 0.004, 0.002]));
 			
 			baseSR_L = Select.kr(modeL, [16000, 31250, 39000, 22000, 14000]);
 			baseSR_R = Select.kr(modeR, [16000, 31250, 39000, 22000, 14000]) * 1.002;
+            fixedFiltFreqL = Select.kr(modeL, [7000, 12800, 18000, 10000, 6500]);
+            fixedFiltFreqR = fixedFiltFreqL * 1.04;
             interpL = Select.kr(modeL, [1, 1, 2, 1, 1]);
             interpR = Select.kr(modeR, [1, 1, 2, 1, 1]);
 			
-			inputL_sig = inputL_sig + (noiseL * 0.5); 
-			inputR_sig = inputR_sig + (noiseR * 0.5);
+            inputL_sig = inputL_sig + (noiseL * 0.5); 
+            inputR_sig = inputR_sig + (noiseR * 0.5);
 
 			yellowL = DC.ar(0); yellowR = DC.ar(0);
-             
+            
             sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1], fb_src11, fb_src12];
 
             p1c = (p1chaos + globalChaos).clip(0, 1); p2c = (p2chaos + globalChaos).clip(0, 1);
@@ -196,8 +197,6 @@ Engine_Ncoco : CroneEngine {
 			
 			c1=Latch.ar(p6,t1); c2=Latch.ar(p1,t2); c3=Latch.ar(p2,t3);
 			c4=Latch.ar(p3,t4); c5=Latch.ar(p4,t5); c6=Latch.ar(p5,t6);
-            
-            // K2A added for scalar/control rate 'which' with Audio arrays
 			out1=Select.ar(K2A.ar(p1shape),[p1,c1]); out2=Select.ar(K2A.ar(p2shape),[p2,c2]); out3=Select.ar(K2A.ar(p3shape),[p3,c3]);
 			out4=Select.ar(K2A.ar(p4shape),[p4,c4]); out5=Select.ar(K2A.ar(p5shape),[p5,c5]); out6=Select.ar(K2A.ar(p6shape),[p6,c6]);
 			
@@ -205,7 +204,7 @@ Engine_Ncoco : CroneEngine {
 
 			mod_val_speedL=((sources_sig*mod_speedL_Amts).sum * dest_gains[0]).tanh.lag(0.01);
 			mod_val_speedR=((sources_sig*mod_speedR_Amts).sum * dest_gains[7]).tanh.lag(0.01);
-             
+            
             baseSpeedL = (speedL + mod_val_speedL + driftL).lag(0.01);
 			baseSpeedR = (speedR + mod_val_speedR + driftR).lag(0.01);
 
@@ -214,14 +213,14 @@ Engine_Ncoco : CroneEngine {
 			mod_val_flipL = Slew.ar(Schmidt.ar(raw_mod_flipL, 0.6, 0.4), 10000, 20) > 0.01;
 			mod_val_flipR = Slew.ar(Schmidt.ar(raw_mod_flipR, 0.6, 0.4), 10000, 20) > 0.01;
             flipLogicL = (flipL + mod_val_flipL).mod(2); flipLogicR = (flipR + mod_val_flipR).mod(2);
-			flipStateL = flipLogicL; flipStateR = flipLogicR; // These are AR signals
+			flipStateL = flipLogicL; flipStateR = flipLogicR;
 
 			finalRateL = Select.ar(flipLogicL > 0.5, [baseSpeedL, baseSpeedL * -1]);
 			finalRateR = Select.ar(flipLogicR > 0.5, [baseSpeedR, baseSpeedR * -1]);
 			
 			endL = (loopLenL.lag(0.1) * 48000).min(BufFrames.kr(bufL));
 			endR = (loopLenR.lag(0.1) * 48000).min(BufFrames.kr(bufR));
-             
+            
 			raw_mod_skipL = (sources_sig*mod_skipL_Amts).sum * dest_gains[5];
 			raw_mod_skipR = (sources_sig*mod_skipR_Amts).sum * dest_gains[12];
 			mod_val_skipL = Slew.ar(Schmidt.ar(raw_mod_skipL, 0.6, 0.4), 10000, 20) > 0.01;
@@ -232,17 +231,17 @@ Engine_Ncoco : CroneEngine {
 			lowerL = stutterRateL - (stutterChaosL * (stutterRateL - minTime));
 			upperL = stutterRateL + (stutterChaosL * (maxTime - stutterRateL));
 			demandL = Dwhite(lowerL, upperL);
-			autoTrigL = TDuty.ar(demandL, reset: gateSkipL) * gateSkipL;
+			autoTrigL = TDuty.ar(demandL, reset: K2A.ar(gateSkipL)) * K2A.ar(gateSkipL);
 			lowerR = stutterRateR - (stutterChaosR * (stutterRateR - minTime));
 			upperR = stutterRateR + (stutterChaosR * (maxTime - stutterRateR));
 			demandR = Dwhite(lowerR, upperR);
-			autoTrigR = TDuty.ar(demandR, reset: gateSkipR) * gateSkipR;
+			autoTrigR = TDuty.ar(demandR, reset: K2A.ar(gateSkipR)) * K2A.ar(gateSkipR);
 			
-			finalJumpTrigL = Select.ar(K2A.ar(skipModeL), [Changed.ar(gateSkipL), autoTrigL]);
-			finalJumpTrigR = Select.ar(K2A.ar(skipModeR), [Changed.ar(gateSkipR), autoTrigR]);
+			finalJumpTrigL = Select.ar(K2A.ar(skipModeL), [Changed.ar(K2A.ar(gateSkipL)), autoTrigL]);
+			finalJumpTrigR = Select.ar(K2A.ar(skipModeR), [Changed.ar(K2A.ar(gateSkipR)), autoTrigR]);
 			
 			rawPtrL = fb_yellow[0] * endL; rawPtrR = fb_yellow[1] * endR;
-			freezePosL = Latch.ar(rawPtrL, gateSkipL); freezePosR = Latch.ar(rawPtrR, gateSkipR);
+			freezePosL = Latch.ar(rawPtrL, K2A.ar(gateSkipL)); freezePosR = Latch.ar(rawPtrR, K2A.ar(gateSkipR));
 			
 			resetPosL = Select.ar(K2A.ar(skipModeL), [TRand.ar(0, endL, finalJumpTrigL), freezePosL]);
 			resetPosR = Select.ar(K2A.ar(skipModeR), [TRand.ar(0, endR, finalJumpTrigR), freezePosR]);
@@ -257,22 +256,22 @@ Engine_Ncoco : CroneEngine {
 
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
-
+			
 			readL = Select.ar(K2A.ar(modeL), [
 				readL,  
 				readL,  
 				readL,  
-				readL.sign * (((2.pow(readL.abs * 128)) - 1) / 255),  
+				(readL.sign * (((2.pow(readL.abs * 128)) - 1) / 255)),  
 				adpcmReconL                                               
 			]);
 			readR = Select.ar(K2A.ar(modeR), [
 				readR,
 				readR,
 				readR,
-				readR.sign * (((2.pow(readR.abs * 128)) - 1) / 255),
+				(readR.sign * (((2.pow(readR.abs * 128)) - 1) / 255)),
 				adpcmReconR
 			]);
-			
+
             readL = readL + (noiseL * 0.5); 
             readR = readR + (noiseR * 0.5);
 
@@ -295,7 +294,7 @@ Engine_Ncoco : CroneEngine {
 			mod_val_audioInL = (mod_val_audioInL * dest_gains[22] * 4.0).tanh;
 			mod_val_audioInR = LeakDC.ar((sources_sig*mod_audioInR_Amts).sum);
 			mod_val_audioInR = (mod_val_audioInR * dest_gains[23] * 4.0).tanh;
-             
+            
 			raw_mod_recL = (sources_sig*mod_recL_Amts).sum * dest_gains[6];
 			raw_mod_recR = (sources_sig*mod_recR_Amts).sum * dest_gains[13];
 			mod_val_recL = Slew.ar(Schmidt.ar(raw_mod_recL, 0.6, 0.4), 10000, 20) > 0.01;
@@ -310,37 +309,16 @@ Engine_Ncoco : CroneEngine {
 
 			feedbackL = readL * (fbL + mod_val_fbL).clip(0, 1.2) * 1.15;
 			feedbackR = readR * (fbR + mod_val_fbR).clip(0, 1.2) * 1.15;
-			feedbackL = LPF.ar(feedbackL, Select.kr(modeL, [7000, 12800, 18000, 10000, 6500])).softclip;
-			feedbackR = LPF.ar(feedbackR, Select.kr(modeR, [7000, 12800, 18000, 10000, 6500]) * 1.04).softclip;
+			feedbackL = LPF.ar(feedbackL, fixedFiltFreqL).softclip;
+			feedbackR = LPF.ar(feedbackR, fixedFiltFreqR).softclip;
 			
 			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
 			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
-			writeL = Select.ar(K2A.ar(modeL), [
-				writeL.round(0.5**8),  
-				writeL.round(0.5**12),  
-				writeL.round(0.5**16),  
-				writeL.sign * ((log(1 + (255 * writeL.abs)) / log(256)).round(1/128)),  
-				adpcmQuantL / 7          
-			]);
-			writeR = Select.ar(K2A.ar(modeR), [
-				writeR.round(0.5**8),
-				writeR.round(0.5**12),
-				writeR.round(0.5**16),
-				writeR.sign * ((log(1 + (255 * writeR.abs)) / log(256)).round(1/128)),
-				adpcmQuantR / 7
-			]);
-			
-            isNot16BitL = (modeL < 1.5) + (modeL > 2.5);
-            isNot16BitR = (modeR < 1.5) + (modeR > 2.5);
+			isAdpcmL = modeL > 3.5;
+			isAdpcmR = modeR > 3.5;
 
-			writeL = Select.ar(K2A.ar(isNot16BitL), [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeL, [0.02, 0.004, 0.001, 0.015, 0.01])))))]);
-			writeR = Select.ar(K2A.ar(isNot16BitR), [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeR, [0.02, 0.004, 0.001, 0.015, 0.01])))))]);
-			
-			isAdpcmL = (modeL > 3.5);
-			isAdpcmR = (modeR > 3.5);
-
-			// L channel ADPCM 
+			// L channel ADPCM
 			adpcmStepL = (feedback_in[10] * isAdpcmL).max(1);
 			adpcmPredL = feedback_in[11] * isAdpcmL;
 			adpcmDiffL = writeL - adpcmPredL;
@@ -350,7 +328,7 @@ Engine_Ncoco : CroneEngine {
 				[DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.95), DC.ar(0.95), DC.ar(1.0), DC.ar(1.0), DC.ar(1.0), DC.ar(1.05), DC.ar(1.05), DC.ar(1.1), DC.ar(1.15), DC.ar(1.2), DC.ar(1.3), DC.ar(1.5)])).clip(1, 500);
 			adpcmNewPredL = adpcmReconL.clip(-1, 1);
 
-			// R channel ADPCM 
+			// R channel ADPCM
 			adpcmStepR = (feedback_in[12] * isAdpcmR).max(1);
 			adpcmPredR = feedback_in[13] * isAdpcmR;
 			adpcmDiffR = writeR - adpcmPredR;
@@ -360,27 +338,36 @@ Engine_Ncoco : CroneEngine {
 				[DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.95), DC.ar(0.95), DC.ar(1.0), DC.ar(1.0), DC.ar(1.0), DC.ar(1.05), DC.ar(1.05), DC.ar(1.1), DC.ar(1.15), DC.ar(1.2), DC.ar(1.3), DC.ar(1.5)])).clip(1, 500);
 			adpcmNewPredR = adpcmReconR.clip(-1, 1);
 
+			writeL = Select.ar(K2A.ar(modeL), [
+				writeL.round(0.5**8),   
+				writeL.round(0.5**12),  
+				writeL.round(0.5**16),  
+				(writeL.sign * ((log(1 + (255 * writeL.abs)) / log(256)).round(1/128))), 
+				adpcmQuantL / 7          
+			]);
+			writeR = Select.ar(K2A.ar(modeR), [
+				writeR.round(0.5**8),
+				writeR.round(0.5**12),
+				writeR.round(0.5**16),
+				(writeR.sign * ((log(1 + (255 * writeR.abs)) / log(256)).round(1/128))),
+				adpcmQuantR / 7
+			]);
+			
+			isNot16BitL = (modeL < 1.5) + (modeL > 2.5);
+			isNot16BitR = (modeR < 1.5) + (modeR > 2.5);
+			
+			writeL = Select.ar(K2A.ar(isNot16BitL), [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeL, [0.02, 0.004, 0.001, 0.015, 0.01])))))]);
+			writeR = Select.ar(K2A.ar(isNot16BitR), [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeR, [0.02, 0.004, 0.001, 0.015, 0.01])))))]);
+			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
 			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar,
 				adpcmNewStepL, adpcmNewPredL, adpcmNewStepR, adpcmNewPredR]);
 				
 			osc_trigger = Impulse.kr(30);
-            
-            // Fix SendReply to correctly A2K all internal Audio Signals
-			SendReply.kr(osc_trigger, '/update', [
-                A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), 
-                A2K.kr(gateRecL), A2K.kr(gateRecR), 
-                A2K.kr(flipStateL), A2K.kr(flipStateR), 
-                A2K.kr((skipL + mod_val_skipL).clip(0,1)), A2K.kr((skipR + mod_val_skipR).clip(0,1)), 
-                A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), 
-                envL, envR, 
-                A2K.kr(yellowL), A2K.kr(yellowR), 
-                A2K.kr(finalRateL), A2K.kr(finalRateR), 
-                A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), 
-                A2K.kr(src11_ar), A2K.kr(src12_ar)
-            ]);
+			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), A2K.kr(flipStateL), A2K.kr(flipStateR), A2K.kr((skipL + mod_val_skipL).clip(0,1)), A2K.kr((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), A2K.kr(finalRateL), A2K.kr(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
+            // BRIDGE: OUTPUT TO BUSES
             Out.ar(bus_tape_out, [readL, readR]);
             Out.ar(bus_mon_out, [clean_preampL + mod_val_audioInL, clean_preampR + mod_val_audioInR]);
             Out.ar(bus_bleed_out, [bleedL, bleedR]); 
@@ -393,7 +380,7 @@ Engine_Ncoco : CroneEngine {
 		// SYNTH 2: OUT (Mix, Filter, Amp)
 		// -----------------------------------------------------------
 		SynthDef(\NcocoOut, {
-            arg out, bus_tape_in, bus_mon_in, bus_bleed_in,
+            arg out, bus_tape_in, bus_mon_in, bus_bleed_in, 
             bus_mvol_in, bus_mfilt_in,
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
             bleedPost=0, 
@@ -448,7 +435,6 @@ Engine_Ncoco : CroneEngine {
             dfm1R = DFM1.ar(dfm1R, lpfFreqR, 0, 1.0, 0, 0.0003);       
             dfm1R = HPF.ar(dfm1R, hpfFreqR) * dfm1Gain;                  
 
-            // Guarded DJ filter topology with safe rate bridging 
 			sigL = Select.ar(K2A.ar(totalFiltL.abs < 0.05), [
 				Select.ar(K2A.ar(djFilterType), [classicL, dfm1L]),
 				sigL
@@ -537,8 +523,8 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("flipR", "i", { |msg| synth_core.set(\flipR, msg[1]) });
 		this.addCommand("skipL", "i", { |msg| synth_core.set(\skipL, msg[1]) });
 		this.addCommand("skipR", "i", { |msg| synth_core.set(\skipR, msg[1]) });
-		this.addCommand("modeL", "f", { |msg| synth_core.set(\modeL, msg[1]) });  
-		this.addCommand("modeR", "f", { |msg| synth_core.set(\modeR, msg[1]) });  
+		this.addCommand("modeL", "f", { |msg| synth_core.set(\modeL, msg[1]) });
+		this.addCommand("modeR", "f", { |msg| synth_core.set(\modeR, msg[1]) });
 		this.addCommand("slew_speed", "f", { |msg| synth_core.set(\slew_speed, msg[1]) });
 		this.addCommand("preampL", "f", { |msg| synth_core.set(\preampL, msg[1]) });
 		this.addCommand("preampR", "f", { |msg| synth_core.set(\preampR, msg[1]) });
