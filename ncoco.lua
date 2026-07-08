@@ -1,4 +1,4 @@
--- ncoco.lua v2.08
+-- ncoco.lua v2.03
 -- CHANGELOG v2.03:
 -- 1. FIX: Added math.randomseed() for random petal seeds at script start.
 -- 2. FIX: Replaced recursive copy_table with shallow copy for safety.
@@ -422,7 +422,7 @@ function init()
     clock_ids[5] = cid_16n
     
     G.loaded = true 
-    print("Ncoco v2.08 Ready.")
+    print("Ncoco v2.03 Ready.")
   end)
 end
 
@@ -587,11 +587,11 @@ function key(n,z)
     local is_link = G.focus.edit_l and G.focus.edit_r
     if G.focus.edit_l or is_link then 
        if n==3 then 
-          local v = params:get("bitsL"); params:set("bitsL", (v%5)+1)
-          if is_link then params:set("bitsR", (v%5)+1) end
+          local v = params:get("bitsL"); params:set("bitsL", (v%3)+1)
+          if is_link then params:set("bitsR", (v%3)+1) end
        end
     elseif G.focus.edit_r then 
-       if n==3 then local v=params:get("bitsR"); params:set("bitsR", (v%5)+1) end
+       if n==3 then local v=params:get("bitsR"); params:set("bitsR", (v%3)+1) end
     else 
        if n==2 then 
          local v = 1 - params:get("recL")

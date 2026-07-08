@@ -1,6 +1,4 @@
--- lib/ui.lua v2.02
--- CHANGELOG v2.02:
--- 1. UI: Added "ADPCM" to BIT_NAMES for new 5th bit-depth mode.
+-- lib/ui.lua v2.01
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:
@@ -21,7 +19,7 @@ local DST_NAMES = {
   [21]="VOL 1", [22]="VOL 2",
   [23]="AUD IN 1", [24]="AUD IN 2"
 }
-local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="16bit", [4]="μ-law", [5]="ADPCM"}
+local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="16bit"}
 
 function UI.update_histories(G)
   for i=1, 2 do

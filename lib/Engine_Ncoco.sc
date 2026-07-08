@@ -1,20 +1,7 @@
-/// Engine_Ncoco.sc v2.09
-// CHANGELOG v2.09:
-// 1. FIX: Eliminadas 4 variables muertas (is12L/R, fixedFiltFreqL/R, jitterAmountL/R, bleedAmpL/R).
-// 2. OPT: Empaquetadas todas las variables L/R en arreglos [L,R] para reducir el conteo de vars.
-//    - 82 vars v2.08 → 38 arreglos, 24 vars modulación → 12 arreglos, ~70 vars señales → ~35 arreglos.
-//    - NcocoCore: 56 args + 170 vars = 226 total (bajo el límite de 246).
-// CHANGELOG v2.08:
-// 1. NEW: 5th bit-depth mode "ADPCM" (G.726 leaky step adaptation).
-// 2. NEW: 4th bit-depth mode "u-law" (8-bit companded).
-// 3. NEW: Dither (TPDF on u-law, adaptive on ADPCM) per channel.
-// 4. NEW: Noise Shaping (1st/2nd Order) with LocalIn state tracking.
-// 5. NEW: Encode sub-params inside bitDepthL/bitDepthR (zero new commands).
-// 6. ARCH: Expanded LocalIn/LocalOut from 10 to 20 channels (NS + ADPCM state).
-// 7. OPT: Select.ar tables (indexed by bdInt) replace if/else chain.
+// Engine_Ncoco.sc v2.06
 // CHANGELOG v2.06:
 // 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
-// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes — 15kHz max, closes properly.
+// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes - 15kHz max, closes properly.
 // 3. TWEAK: Default DFM1 gain 0.15 (conservative for 2-stage LPF cascade).
 // CHANGELOG v2.04:
 // 1. ENHANCEMENT: DJ Filter now has DFM1 option (menu param, default=Classic).
@@ -124,142 +111,77 @@ Engine_Ncoco : CroneEngine {
 			var p1, p2, p3, p4, p5, p6, c1, c2, c3, c4, c5, c6; 
 			var b_ph1, b_ph2, b_ph3, b_ph4, b_ph5, b_ph6, t1, t2, t3, t4, t5, t6; 
 			var out1, out2, out3, out4, out5, out6, sources_sig; 
-			var p1c, p2c, p3c, p4c, p5c, p6c;
+            var p1c, p2c, p3c, p4c, p5c, p6c;
 			
-			var raw_mod_flip = [0, 0], mod_val_flip = [0, 0];
-			var raw_mod_skip = [0, 0], mod_val_skip = [0, 0];
-			var raw_mod_rec = [0, 0], mod_val_rec = [0, 0];
-			var mod_val_speed = [0, 0], mod_val_amp = [0, 0];
-			var mod_val_fb = [0, 0], mod_val_filt = [0, 0];
-			var mod_val_vol = [0, 0], mod_val_audioIn = [0, 0];
+			var raw_mod_flipL, raw_mod_flipR, mod_val_flipL, mod_val_flipR;
+			var raw_mod_skipL, raw_mod_skipR, mod_val_skipL, mod_val_skipR;
+			var raw_mod_recL, raw_mod_recR, mod_val_recL, mod_val_recR;
+			var mod_val_speedL, mod_val_speedR, mod_val_ampL, mod_val_ampR;
+			var mod_val_fbL, mod_val_fbR, mod_val_filtL, mod_val_filtR;
+			var mod_val_volL, mod_val_volR, mod_val_audioInL, mod_val_audioInR;
 			var mod_p1, mod_p2, mod_p3, mod_p4, mod_p5, mod_p6;
 			
-			var dry = [0, 0], finalRate = [0, 0], ptr = [0, 0], read = [0, 0], write = [0, 0];
-			var gateRec = [0, 0], noise = [0, 0], baseSR = [0, 0], interpVals = [0, 0];
-			var is8L, is8R;
-			var end = [0, 0], yellow = [0, 0];
-			var drift = [0, 0], bleed = [0, 0], baseSpeed = [0, 0];
-			var flipLogic = [0, 0], flipState = [0, 0], recLogic = [0, 0];
-			var feedback = [0, 0], osc_trigger; 
-			var preampNoise = [0, 0], feedback_in, fb_petals, fb_yellow;
-			var gateSkip = [0, 0], freezePos = [0, 0], rawPtr = [0, 0];
-			var minTime, maxTime, lower = [0, 0], upper = [0, 0];
-			var demand = [0, 0], autoTrig = [0, 0], finalJumpTrig = [0, 0];
-			var resetPos = [0, 0];
-			var clean_preamp = [0, 0];
-			var relIn = [0, 0], atkIn = [0, 0]; 
-			var relCo = [0, 0], atkCo = [0, 0]; 
-			var envFb = [0, 0];
-			var src11_ar, src12_ar; 
-			var fb_src11, fb_src12; 
-			// [v2.08] VARS EMPAQUETADAS EN ARREGLOS [L, R]
-			var bdInt = [0, 0];
-			var is16 = [0, 0], isUlaw = [0, 0], isAdpcm = [0, 0];
-			var ulawFrac = [0, 0], ulawDither = [0, 0], ulawNS = [0, 0];
-			var adpcmFrac = [0, 0];
-			var adpcmBits = [0, 0], adpcmPred = [0, 0];
-			var adpcmDither = [0, 0], adpcmNS = [0, 0];
-			var adpcmSR = [0, 0];
-			var fixFilt = [0, 0];
-			var jitterAmt = [0, 0];
-			var bleedAmt = [0, 0];
-			var quantBits = [0, 0];
-			var ulawDitherSig = [0, 0];
-			var ulawIn = [0, 0], companded = [0, 0], qComp = [0, 0];
-			var ulawExp = [0, 0], ulawIdx = [0, 0];
-			var adpcmPredVal = [0, 0];
-			var adpcmDiff = [0, 0], adpcmQDiff = [0, 0];
-			var adpcmDecoded = [0, 0];
-			var stepBase = [0, 0], stepMin = [0, 0], stepMax = [0, 0];
-			var newStep = [0, 0], stepMult = [0, 0];
-			var adpcmDitherSig = [0, 0];
-			var writeQ = [0, 0];
-			// FEEDBACK STATE: nsError = [L_err, L_err2, R_err, R_err2]  (feedback_in[10..13])
-			var nsError = [0, 0, 0, 0];
-			var nsFb = [0, 0];
-			// adpcmStateL = [state1, state2, stepState]  (feedback_in[14..16])
-			var adpcmStateL = [0, 0, 0];
-			// adpcmStateR = [state1, state2, stepState]  (feedback_in[17..19])
-			var adpcmStateR = [0, 0, 0];
+			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR, readL, readR, writeL, writeR;
+			var gateRecL, gateRecR, noiseL, noiseR, baseSR_L, baseSR_R, interpL, interpR;
+			var is8L, is12L, is8R, is12R, fixedFiltFreqL, fixedFiltFreqR;
+			var endL, endR, yellowL, yellowR;
+			var driftL, driftR, bleedL, bleedR, baseSpeedL, baseSpeedR;
+			var flipLogicL, flipLogicR, flipStateL, flipStateR, recLogicL, recLogicR;
+			var feedbackL, feedbackR, osc_trigger; 
+			var preampNoiseL, preampNoiseR, feedback_in, fb_petals, fb_yellow;
+			var gateSkipL, gateSkipR, freezePosL, freezePosR, rawPtrL, rawPtrR;
+			var minTime, maxTime, lowerL, upperL, lowerR, upperR;
+			var demandL, demandR, autoTrigL, autoTrigR, finalJumpTrigL, finalJumpTrigR;
+			var resetPosL, resetPosR, jitterAmountL, jitterAmountR;
+            var clean_preampL, clean_preampR;
+            var relInL, relInR, atkInL, atkInR; 
+            var relCoL, relCoR, atkCoL, atkCoR; 
+            var envFbL, envFbR;
+            var src11_ar, src12_ar; 
+            var fb_src11, fb_src12; 
+			var bleedAmpL, bleedAmpR;
 
 			// --- CORE DSP ---
 			
-			feedback_in = LocalIn.ar(20); // [v2.08] Expanded for NS + ADPCM state
+            feedback_in = LocalIn.ar(10);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
             fb_src11 = feedback_in[8];
             fb_src12 = feedback_in[9];
-			// [v2.08] Noise Shaping state
-			nsError[0] = feedback_in[10]; nsError[1] = feedback_in[11];
-			nsError[2] = feedback_in[12]; nsError[3] = feedback_in[13];
-			// [v2.08] ADPCM state (persistent predictor + step)
-			adpcmStateL[0] = feedback_in[14]; adpcmStateL[1] = feedback_in[15];
-			adpcmStateL[2] = max(feedback_in[16], 0.0001);
-			adpcmStateR[0] = feedback_in[17]; adpcmStateR[1] = feedback_in[18];
-			adpcmStateR[2] = max(feedback_in[19], 0.0001);
 
-			preampNoise[0] = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
-			preampNoise[1] = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
+			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
+			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
 			inputL_sig = In.ar(inL); inputR_sig = In.ar(inR);
 			
             inputL_sig = HPF.ar(inputL_sig, 20); inputR_sig = HPF.ar(inputR_sig, 20);
-			inputL_sig = ((inputL_sig * preampL) + preampNoise[0]).tanh; 
-			inputR_sig = ((inputR_sig * preampR) + preampNoise[1]).tanh;
+			inputL_sig = ((inputL_sig * preampL) + preampNoiseL).tanh; 
+			inputR_sig = ((inputR_sig * preampR) + preampNoiseR).tanh;
 			
-            relIn[0] = envSlewL.linexp(0, 1, 0.05, 2.5); relIn[1] = envSlewR.linexp(0, 1, 0.05, 2.5);
-            atkIn[0] = (relIn[0] * 0.1).max(0.002); atkIn[1] = (relIn[1] * 0.1).max(0.002);
-			envL_raw = Amplitude.kr(inputL_sig, atkIn[0], relIn[0]); 
-			envR_raw = Amplitude.kr(inputR_sig, atkIn[1], relIn[1]);
+            relInL = envSlewL.linexp(0, 1, 0.05, 2.5); relInR = envSlewR.linexp(0, 1, 0.05, 2.5);
+            atkInL = (relInL * 0.1).max(0.002); atkInR = (relInR * 0.1).max(0.002);
+			envL_raw = Amplitude.kr(inputL_sig, atkInL, relInL); 
+			envR_raw = Amplitude.kr(inputR_sig, atkInR, relInR);
 			envL = envL_raw * 2.0; envR = envR_raw * 2.0;
 
-            clean_preamp[0] = inputL_sig; clean_preamp[1] = inputR_sig;
+            clean_preampL = inputL_sig; clean_preampR = inputR_sig;
 
-			// [v2.08] MODE DETECTION
-			bdInt[0] = bitDepthL.trunc; bdInt[1] = bitDepthR.trunc;
-			is8L = (bdInt[0] == 8).asInteger; is8R = (bdInt[1] == 8).asInteger;
-			is16[0] = (bdInt[0] >= 14).asInteger; is16[1] = (bdInt[1] >= 14).asInteger;
-			isUlaw[0] = (bdInt[0] == 6).asInteger; isUlaw[1] = (bdInt[1] == 6).asInteger;
-			isAdpcm[0] = (bdInt[0] == 7).asInteger; isAdpcm[1] = (bdInt[1] == 7).asInteger;
-			// u-law sub-params
-			ulawFrac[0] = isUlaw[0] * (bitDepthL - 6);
-			ulawFrac[1] = isUlaw[1] * (bitDepthR - 6);
-			ulawDither[0] = (ulawFrac[0] * 10 + 0.0001).trunc;
-			ulawDither[1] = (ulawFrac[1] * 10 + 0.0001).trunc;
-			ulawNS[0] = ((ulawFrac[0] * 100 + 0.0001).trunc) % 10;
-			ulawNS[1] = ((ulawFrac[1] * 100 + 0.0001).trunc) % 10;
-			// ADPCM sub-params
-			adpcmFrac[0] = isAdpcm[0] * (bitDepthL - 7);
-			adpcmFrac[1] = isAdpcm[1] * (bitDepthR - 7);
-			adpcmBits[0] = (adpcmFrac[0] * 100 + 0.0001).trunc;
-			adpcmBits[1] = (adpcmFrac[1] * 100 + 0.0001).trunc;
-			adpcmPred[0] = ((adpcmFrac[0] * 1000 + 0.0001).trunc) % 10;
-			adpcmPred[1] = ((adpcmFrac[1] * 1000 + 0.0001).trunc) % 10;
-			adpcmDither[0] = ((adpcmFrac[0] * 10000 + 0.0001).trunc) % 10;
-			adpcmDither[1] = ((adpcmFrac[1] * 10000 + 0.0001).trunc) % 10;
-			adpcmNS[0] = ((adpcmFrac[0] * 100000 + 0.0001).trunc) % 10;
-			adpcmNS[1] = ((adpcmFrac[1] * 100000 + 0.0001).trunc) % 10;
-			// Select.ar tables
-			noise[0] = PinkNoise.ar(Select.ar(bdInt[0], [0,0,0,0,0,0, 0.006,0.003, 0.008,0,0,0, 0.0016,0,0,0, 0.00016]));
-			noise[1] = PinkNoise.ar(Select.ar(bdInt[1], [0,0,0,0,0,0, 0.006,0.003, 0.008,0,0,0, 0.0016,0,0,0, 0.00016]));
-			baseSR[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 22000,0, 16000,0,0,0, 31250,0,0,0, 39000]);
-			baseSR[1] = (Select.ar(bdInt[1], [0,0,0,0,0,0, 22000,0, 16000,0,0,0, 31250,0,0,0, 39000])) * 1.002;
-			adpcmSR[0] = Select.ar(adpcmBits[0] - 4, [14000, 16000, 16000]);
-			adpcmSR[1] = Select.ar(adpcmBits[1] - 4, [14000, 16000, 16000]);
-			baseSR[0] = Select.ar(isAdpcm[0], [baseSR[0], adpcmSR[0]]);
-			baseSR[1] = Select.ar(isAdpcm[1], [baseSR[1], adpcmSR[1]]);
-			fixFilt[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 9000,8000, 7000,0,0,0, 12800,0,0,0, 18000]);
-			fixFilt[1] = (Select.ar(bdInt[1], [0,0,0,0,0,0, 9000,8000, 7000,0,0,0, 12800,0,0,0, 18000])) * 1.04;
-			interpVals[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 1,1, 1,0,0,0, 2,0,0,0, 3]);
-			interpVals[1] = Select.ar(bdInt[1], [0,0,0,0,0,0, 1,1, 1,0,0,0, 2,0,0,0, 3]);
-			jitterAmt[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 0.02,0.015, 0.02,0,0,0, 0.004,0,0,0, 0.001]);
-			jitterAmt[1] = Select.ar(bdInt[1], [0,0,0,0,0,0, 0.02,0.015, 0.02,0,0,0, 0.004,0,0,0, 0.001]);
-			bleedAmt[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 0.002,0.0015, 0.0025,0,0,0, 0.001,0,0,0, 0]);
-			bleedAmt[1] = Select.ar(bdInt[1], [0,0,0,0,0,0, 0.002,0.0015, 0.0025,0,0,0, 0.001,0,0,0, 0]);
+			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
+			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			
-			inputL_sig = inputL_sig + (noise[0] * 0.5); 
-			inputR_sig = inputR_sig + (noise[1] * 0.5);
+			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.0016) + ((1 - is8L - is12L) * 0.00016));
+			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.0016) + ((1 - is8R - is12R) * 0.00016));
+			
+			baseSR_L = (is8L * 16000) + (is12L * 31250) + ((1 - is8L - is12L) * 39000);
+			baseSR_R = ((is8R * 16000) + (is12R * 31250) + ((1 - is8R - is12R) * 39000)) * 1.002;
+            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + ((1 - is8L - is12L) * 18000);
+            fixedFiltFreqR = fixedFiltFreqL * 1.04;
+            interpL = 1 + (1 - is8L - is12L); 
+            interpR = 1 + (1 - is8R - is12R);
+			
+            inputL_sig = inputL_sig + (noiseL * 0.5); 
+            inputR_sig = inputR_sig + (noiseR * 0.5);
 
-			yellow[0] = DC.ar(0); yellow[1] = DC.ar(0);
+			yellowL = DC.ar(0); yellowR = DC.ar(0);
             
             sources_sig = [fb_petals[0], fb_petals[1], fb_petals[2], fb_petals[3], fb_petals[4], fb_petals[5], K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1], fb_src11, fb_src12];
 
@@ -287,180 +209,134 @@ Engine_Ncoco : CroneEngine {
 			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
 			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
 			
-			drift[0] = LFDNoise3.ar(0.08, driftAmt); drift[1] = LFDNoise3.ar(0.08, driftAmt);
+			driftL = LFDNoise3.ar(0.08, driftAmt); driftR = LFDNoise3.ar(0.08, driftAmt);
 
-			mod_val_speed[0]=((sources_sig*mod_speedL_Amts).sum * dest_gains[0]).tanh.lag(0.01);
-			mod_val_speed[1]=((sources_sig*mod_speedR_Amts).sum * dest_gains[7]).tanh.lag(0.01);
+			mod_val_speedL=((sources_sig*mod_speedL_Amts).sum * dest_gains[0]).tanh.lag(0.01);
+			mod_val_speedR=((sources_sig*mod_speedR_Amts).sum * dest_gains[7]).tanh.lag(0.01);
             
-            baseSpeed[0] = (speedL + mod_val_speed[0] + drift[0]).lag(0.01);
-			baseSpeed[1] = (speedR + mod_val_speed[1] + drift[1]).lag(0.01);
+            baseSpeedL = (speedL + mod_val_speedL + driftL).lag(0.01);
+			baseSpeedR = (speedR + mod_val_speedR + driftR).lag(0.01);
 
-			raw_mod_flip[0] = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
-			raw_mod_flip[1] = (sources_sig*mod_flipR_Amts).sum * dest_gains[11];
-			mod_val_flip[0] = Slew.ar(Schmidt.ar(raw_mod_flip[0], 0.6, 0.4), 10000, 20) > 0.01;
-			mod_val_flip[1] = Slew.ar(Schmidt.ar(raw_mod_flip[1], 0.6, 0.4), 10000, 20) > 0.01;
-            flipLogic[0] = (flipL + mod_val_flip[0]).mod(2); flipLogic[1] = (flipR + mod_val_flip[1]).mod(2);
-			flipState[0] = flipLogic[0]; flipState[1] = flipLogic[1];
+			raw_mod_flipL = (sources_sig*mod_flipL_Amts).sum * dest_gains[4];
+			raw_mod_flipR = (sources_sig*mod_flipR_Amts).sum * dest_gains[11];
+			mod_val_flipL = Slew.ar(Schmidt.ar(raw_mod_flipL, 0.6, 0.4), 10000, 20) > 0.01;
+			mod_val_flipR = Slew.ar(Schmidt.ar(raw_mod_flipR, 0.6, 0.4), 10000, 20) > 0.01;
+            flipLogicL = (flipL + mod_val_flipL).mod(2); flipLogicR = (flipR + mod_val_flipR).mod(2);
+			flipStateL = flipLogicL; flipStateR = flipLogicR;
 
-			finalRate[0] = Select.ar(flipLogic[0] > 0.5, [baseSpeed[0], baseSpeed[0] * -1]);
-			finalRate[1] = Select.ar(flipLogic[1] > 0.5, [baseSpeed[1], baseSpeed[1] * -1]);
+			finalRateL = Select.ar(flipLogicL > 0.5, [baseSpeedL, baseSpeedL * -1]);
+			finalRateR = Select.ar(flipLogicR > 0.5, [baseSpeedR, baseSpeedR * -1]);
 			
-			end[0] = (loopLenL.lag(0.1) * 48000).min(BufFrames.kr(bufL));
-			end[1] = (loopLenR.lag(0.1) * 48000).min(BufFrames.kr(bufR));
+			endL = (loopLenL.lag(0.1) * 48000).min(BufFrames.kr(bufL));
+			endR = (loopLenR.lag(0.1) * 48000).min(BufFrames.kr(bufR));
             
-			raw_mod_skip[0] = (sources_sig*mod_skipL_Amts).sum * dest_gains[5];
-			raw_mod_skip[1] = (sources_sig*mod_skipR_Amts).sum * dest_gains[12];
-			mod_val_skip[0] = Slew.ar(Schmidt.ar(raw_mod_skip[0], 0.6, 0.4), 10000, 20) > 0.01;
-			mod_val_skip[1] = Slew.ar(Schmidt.ar(raw_mod_skip[1], 0.6, 0.4), 10000, 20) > 0.01;
+			raw_mod_skipL = (sources_sig*mod_skipL_Amts).sum * dest_gains[5];
+			raw_mod_skipR = (sources_sig*mod_skipR_Amts).sum * dest_gains[12];
+			mod_val_skipL = Slew.ar(Schmidt.ar(raw_mod_skipL, 0.6, 0.4), 10000, 20) > 0.01;
+			mod_val_skipR = Slew.ar(Schmidt.ar(raw_mod_skipR, 0.6, 0.4), 10000, 20) > 0.01;
 			
-			gateSkip[0] = ((skipL + mod_val_skip[0]) > 0.5); gateSkip[1] = ((skipR + mod_val_skip[1]) > 0.5);
+			gateSkipL = ((skipL + mod_val_skipL) > 0.5); gateSkipR = ((skipR + mod_val_skipR) > 0.5);
 			minTime = 0.001; maxTime = 0.350;
-			lower[0] = stutterRateL - (stutterChaosL * (stutterRateL - minTime));
-			upper[0] = stutterRateL + (stutterChaosL * (maxTime - stutterRateL));
-			demand[0] = Dwhite(lower[0], upper[0]);
-			autoTrig[0] = TDuty.ar(demand[0], reset: K2A.ar(gateSkip[0])) * K2A.ar(gateSkip[0]);
-			lower[1] = stutterRateR - (stutterChaosR * (stutterRateR - minTime));
-			upper[1] = stutterRateR + (stutterChaosR * (maxTime - stutterRateR));
-			demand[1] = Dwhite(lower[1], upper[1]);
-			autoTrig[1] = TDuty.ar(demand[1], reset: K2A.ar(gateSkip[1])) * K2A.ar(gateSkip[1]);
+			lowerL = stutterRateL - (stutterChaosL * (stutterRateL - minTime));
+			upperL = stutterRateL + (stutterChaosL * (maxTime - stutterRateL));
+			demandL = Dwhite(lowerL, upperL);
+			autoTrigL = TDuty.ar(demandL, reset: K2A.ar(gateSkipL)) * K2A.ar(gateSkipL);
+			lowerR = stutterRateR - (stutterChaosR * (stutterRateR - minTime));
+			upperR = stutterRateR + (stutterChaosR * (maxTime - stutterRateR));
+			demandR = Dwhite(lowerR, upperR);
+			autoTrigR = TDuty.ar(demandR, reset: K2A.ar(gateSkipR)) * K2A.ar(gateSkipR);
 			
-			finalJumpTrig[0] = Select.ar(skipModeL, [Changed.ar(K2A.ar(gateSkip[0])), autoTrig[0]]);
-			finalJumpTrig[1] = Select.ar(skipModeR, [Changed.ar(K2A.ar(gateSkip[1])), autoTrig[1]]);
+			finalJumpTrigL = Select.ar(skipModeL, [Changed.ar(K2A.ar(gateSkipL)), autoTrigL]);
+			finalJumpTrigR = Select.ar(skipModeR, [Changed.ar(K2A.ar(gateSkipR)), autoTrigR]);
 			
-			rawPtr[0] = fb_yellow[0] * end[0]; rawPtr[1] = fb_yellow[1] * end[1];
-			freezePos[0] = Latch.ar(rawPtr[0], K2A.ar(gateSkip[0])); freezePos[1] = Latch.ar(rawPtr[1], K2A.ar(gateSkip[1]));
+			rawPtrL = fb_yellow[0] * endL; rawPtrR = fb_yellow[1] * endR;
+			freezePosL = Latch.ar(rawPtrL, K2A.ar(gateSkipL)); freezePosR = Latch.ar(rawPtrR, K2A.ar(gateSkipR));
 			
-			resetPos[0] = Select.ar(skipModeL, [TRand.ar(0, end[0], finalJumpTrig[0]), freezePos[0]]);
-			resetPos[1] = Select.ar(skipModeR, [TRand.ar(0, end[1], finalJumpTrig[1]), freezePos[1]]);
+			resetPosL = Select.ar(skipModeL, [TRand.ar(0, endL, finalJumpTrigL), freezePosL]);
+			resetPosR = Select.ar(skipModeR, [TRand.ar(0, endR, finalJumpTrigR), freezePosR]);
 			
-			ptr[0] = Phasor.ar(finalJumpTrig[0], finalRate[0] * BufRateScale.kr(bufL), 0, end[0], resetPos[0]);
-			ptr[1] = Phasor.ar(finalJumpTrig[1], finalRate[1] * BufRateScale.kr(bufR), 0, end[1], resetPos[1]);
+			ptrL = Phasor.ar(finalJumpTrigL, finalRateL * BufRateScale.kr(bufL), 0, endL, resetPosL);
+			ptrR = Phasor.ar(finalJumpTrigR, finalRateR * BufRateScale.kr(bufR), 0, endR, resetPosR);
 			
-			yellow[0] = (ptr[0] / end[0].max(1)); yellow[1] = (ptr[1] / end[1].max(1));
+			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
             // Bleed Logic
-			// Bleed amounts already set via Select.ar tables above
-			bleed[0] = SinOsc.ar((baseSR[0] * finalRate[0].abs).clip(20, 20000)) * bleedAmt[0];
-			bleed[1] = SinOsc.ar((baseSR[1] * finalRate[1].abs).clip(20, 20000)) * bleedAmt[1];
+            bleedAmpL = (is8L * 0.0025) + (is12L * 0.001); 
+            bleedAmpR = (is8R * 0.0025) + (is12R * 0.001);
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmpL;
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmpR;
 
-			read[0] = BufRd.ar(1, bufL, ptr[0], loop:1, interpolation: interpVals[0]);
-			read[1] = BufRd.ar(1, bufR, ptr[1], loop:1, interpolation: interpVals[1]);
+			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
+			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
 			
             // [FIX] Bleed is NOT mixed here anymore. It's sent to Out via b_bleed.
-            // read[0] = read[0] + bleed[0] + (noise[0] * 0.5); // OLD
-            read[0] = read[0] + (noise[0] * 0.5); // NEW: Only noise here
-            read[1] = read[1] + (noise[1] * 0.5);
+            // readL = readL + bleedL + (noiseL * 0.5); // OLD
+            readL = readL + (noiseL * 0.5); // NEW: Only noise here
+            readR = readR + (noiseR * 0.5);
 
             // Coco Env Logic
-            relCo[0] = cocoSlewL.linexp(0, 1, 0.05, 2.5); relCo[1] = cocoSlewR.linexp(0, 1, 0.05, 2.5);
-            atkCo[0] = (relCo[0] * 0.1).max(0.002); atkCo[1] = (relCo[1] * 0.1).max(0.002);
-            envFb[0] = Amplitude.kr(LeakDC.ar(read[0]), atkCo[0], relCo[0]) * 2.0; 
-            envFb[1] = Amplitude.kr(LeakDC.ar(read[1]), atkCo[1], relCo[1]) * 2.0;
-            src11_ar = Select.ar(coco1OutMode, [K2A.ar(envFb[0]), read[0]]);
-            src12_ar = Select.ar(coco2OutMode, [K2A.ar(envFb[1]), read[1]]);
+            relCoL = cocoSlewL.linexp(0, 1, 0.05, 2.5); relCoR = cocoSlewR.linexp(0, 1, 0.05, 2.5);
+            atkCoL = (relCoL * 0.1).max(0.002); atkCoR = (relCoR * 0.1).max(0.002);
+            envFbL = Amplitude.kr(LeakDC.ar(readL), atkCoL, relCoL) * 2.0; 
+            envFbR = Amplitude.kr(LeakDC.ar(readR), atkCoR, relCoR) * 2.0;
+            src11_ar = Select.ar(coco1OutMode, [K2A.ar(envFbL), readL]);
+            src12_ar = Select.ar(coco2OutMode, [K2A.ar(envFbR), readR]);
             
             // Calc Modulations for Output
-			mod_val_amp[0]=((sources_sig*mod_ampL_Amts).sum * dest_gains[1]).tanh.lag(slew_amp);
-			mod_val_amp[1]=((sources_sig*mod_ampR_Amts).sum * dest_gains[8]).tanh.lag(slew_amp);
-			mod_val_fb[0]=((sources_sig*mod_fbL_Amts).sum * dest_gains[2]).tanh.lag(slew_amp);
-			mod_val_fb[1]=((sources_sig*mod_fbR_Amts).sum * dest_gains[9]).tanh.lag(slew_amp);
-			mod_val_filt[0]=((sources_sig*mod_filtL_Amts).sum * dest_gains[3]).tanh.lag(slew_misc);
-			mod_val_filt[1]=((sources_sig*mod_filtR_Amts).sum * dest_gains[10]).tanh.lag(slew_misc);
-			mod_val_vol[0]=((sources_sig*mod_volL_Amts).sum * dest_gains[20]).tanh.lag(slew_amp);
-			mod_val_vol[1]=((sources_sig*mod_volR_Amts).sum * dest_gains[21]).tanh.lag(slew_amp);
-			mod_val_audioIn[0] = LeakDC.ar((sources_sig*mod_audioInL_Amts).sum);
-			mod_val_audioIn[0] = (mod_val_audioIn[0] * dest_gains[22] * 4.0).tanh;
-			mod_val_audioIn[1] = LeakDC.ar((sources_sig*mod_audioInR_Amts).sum);
-			mod_val_audioIn[1] = (mod_val_audioIn[1] * dest_gains[23] * 4.0).tanh;
+			mod_val_ampL=((sources_sig*mod_ampL_Amts).sum * dest_gains[1]).tanh.lag(slew_amp);
+			mod_val_ampR=((sources_sig*mod_ampR_Amts).sum * dest_gains[8]).tanh.lag(slew_amp);
+			mod_val_fbL=((sources_sig*mod_fbL_Amts).sum * dest_gains[2]).tanh.lag(slew_amp);
+			mod_val_fbR=((sources_sig*mod_fbR_Amts).sum * dest_gains[9]).tanh.lag(slew_amp);
+			mod_val_filtL=((sources_sig*mod_filtL_Amts).sum * dest_gains[3]).tanh.lag(slew_misc);
+			mod_val_filtR=((sources_sig*mod_filtR_Amts).sum * dest_gains[10]).tanh.lag(slew_misc);
+			mod_val_volL=((sources_sig*mod_volL_Amts).sum * dest_gains[20]).tanh.lag(slew_amp);
+			mod_val_volR=((sources_sig*mod_volR_Amts).sum * dest_gains[21]).tanh.lag(slew_amp);
+			mod_val_audioInL = LeakDC.ar((sources_sig*mod_audioInL_Amts).sum);
+			mod_val_audioInL = (mod_val_audioInL * dest_gains[22] * 4.0).tanh;
+			mod_val_audioInR = LeakDC.ar((sources_sig*mod_audioInR_Amts).sum);
+			mod_val_audioInR = (mod_val_audioInR * dest_gains[23] * 4.0).tanh;
             
-			raw_mod_rec[0] = (sources_sig*mod_recL_Amts).sum * dest_gains[6];
-			raw_mod_rec[1] = (sources_sig*mod_recR_Amts).sum * dest_gains[13];
-			mod_val_rec[0] = Slew.ar(Schmidt.ar(raw_mod_rec[0], 0.6, 0.4), 10000, 20) > 0.01;
-			mod_val_rec[1] = Slew.ar(Schmidt.ar(raw_mod_rec[1], 0.6, 0.4), 10000, 20) > 0.01;
+			raw_mod_recL = (sources_sig*mod_recL_Amts).sum * dest_gains[6];
+			raw_mod_recR = (sources_sig*mod_recR_Amts).sum * dest_gains[13];
+			mod_val_recL = Slew.ar(Schmidt.ar(raw_mod_recL, 0.6, 0.4), 10000, 20) > 0.01;
+			mod_val_recR = Slew.ar(Schmidt.ar(raw_mod_recR, 0.6, 0.4), 10000, 20) > 0.01;
 
-			recLogic[0] = (recL + mod_val_rec[0]).mod(2); recLogic[1] = (recR + mod_val_rec[1]).mod(2);
-			gateRec[0] = Select.ar(recLogic[0] > 0.5, [K2A.ar(0), K2A.ar(1)]);
-			gateRec[1] = Select.ar(recLogic[1] > 0.5, [K2A.ar(0), K2A.ar(1)]);
+			recLogicL = (recL + mod_val_recL).mod(2); recLogicR = (recR + mod_val_recR).mod(2);
+			gateRecL = Select.ar(recLogicL > 0.5, [K2A.ar(0), K2A.ar(1)]);
+			gateRecR = Select.ar(recLogicR > 0.5, [K2A.ar(0), K2A.ar(1)]);
 
-			dry[0] = inputL_sig * (volInL + mod_val_amp[0]).clip(0, 2);
-			dry[1] = inputR_sig * (volInR + mod_val_amp[1]).clip(0, 2);
+			dryL = inputL_sig * (volInL + mod_val_ampL).clip(0, 2);
+			dryR = inputR_sig * (volInR + mod_val_ampR).clip(0, 2);
 
-			feedback[0] = read[0] * (fbL + mod_val_fb[0]).clip(0, 1.2) * 1.15;
-			feedback[1] = read[1] * (fbR + mod_val_fb[1]).clip(0, 1.2) * 1.15;
-			feedback[0] = LPF.ar(feedback[0], fixFilt[0]).softclip;
-			feedback[1] = LPF.ar(feedback[1], fixFilt[1]).softclip;
+			feedbackL = readL * (fbL + mod_val_fbL).clip(0, 1.2) * 1.15;
+			feedbackR = readR * (fbR + mod_val_fbR).clip(0, 1.2) * 1.15;
+			feedbackL = LPF.ar(feedbackL, fixedFiltFreqL).softclip;
+			feedbackR = LPF.ar(feedbackR, fixedFiltFreqR).softclip;
 			
-			write[0] = ((dry[0]) + mod_val_audioIn[0]) * gateRec[0] + (feedback[0]);
-			write[1] = ((dry[1]) + mod_val_audioIn[1]) * gateRec[1] + (feedback[1]);
+			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
+			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
-			// [v2.08] QUANTIZATION ENGINE
-			quantBits[0] = Select.ar(bdInt[0], [0,0,0,0,0,0, 8,0, 8,0,0,0, 12,0,0,0, 16]);
-			quantBits[1] = Select.ar(bdInt[1], [0,0,0,0,0,0, 8,0, 8,0,0,0, 12,0,0,0, 16]);
+			writeL = writeL.round(0.5 ** bitDepthL);
+			writeR = writeR.round(0.5 ** bitDepthR);
 			
-			// Noise Shaping feedback
-			nsFb[0] = Select.ar(Select.ar(isUlaw[0], [adpcmNS[0], ulawNS[0]]), [DC.ar(0), nsError[0] * 0.5, (nsError[0] * 1.0) - (nsError[1] * 0.25)]);
-			nsFb[1] = Select.ar(Select.ar(isUlaw[1], [adpcmNS[1], ulawNS[1]]), [DC.ar(0), nsError[2] * 0.5, (nsError[2] * 1.0) - (nsError[3] * 0.25)]);
+			jitterAmountL = (is8L * 0.02) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.001);
+			jitterAmountR = (is8R * 0.02) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.001);
 			
-			// PATH 1: Linear
-			writeQ[0] = write[0].round(0.5.pow(quantBits[0]));
-			writeQ[1] = write[1].round(0.5.pow(quantBits[1]));
+			writeL = Select.ar(is8L + is12L, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountL))))]);
+			writeR = Select.ar(is8R + is12R, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountR))))]);
 			
-			// PATH 2: u-law with TPDF dither
-			ulawDitherSig[0] = Select.ar(ulawDither[0], [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5.pow(9)) * 0.5]);
-			ulawDitherSig[1] = Select.ar(ulawDither[1], [DC.ar(0), (WhiteNoise.ar(1) + WhiteNoise.ar(1)) * (0.5.pow(9)) * 0.5]);
-			ulawIn[0] = write[0] + nsFb[0] + ulawDitherSig[0];
-			ulawIn[1] = write[1] + nsFb[1] + ulawDitherSig[1];
-			companded[0] = (ulawIn[0].sign * ((1 + 255 * ulawIn[0].abs).log / 256.log)).clip(-1, 1);
-			companded[1] = (ulawIn[1].sign * ((1 + 255 * ulawIn[1].abs).log / 256.log)).clip(-1, 1);
-			qComp[0] = (companded[0] * 127 + 127).round(1).clip(0, 255);
-			qComp[1] = (companded[1] * 127 + 127).round(1).clip(0, 255);
-			ulawIdx[0] = (qComp[0] - 127) / 127;
-			ulawIdx[1] = (qComp[1] - 127) / 127;
-			ulawExp[0] = ulawIdx[0].sign * ((256.pow(ulawIdx[0].abs) - 1) / 255);
-			ulawExp[1] = ulawIdx[1].sign * ((256.pow(ulawIdx[1].abs) - 1) / 255);
-			
-			// PATH 3: ADPCM with predictor + G.726 leaky step
-			adpcmPredVal[0] = Select.ar(adpcmPred[0], [adpcmStateL[0], (2 * adpcmStateL[0]) - adpcmStateL[1]]);
-			adpcmPredVal[1] = Select.ar(adpcmPred[1], [adpcmStateR[0], (2 * adpcmStateR[0]) - adpcmStateR[1]]);
-			stepBase[0] = Select.ar(adpcmBits[0] - 4, [0.05, 0.025, 0.0125]);
-			stepBase[1] = Select.ar(adpcmBits[1] - 4, [0.05, 0.025, 0.0125]);
-			stepMin[0] = stepBase[0] * 0.1; stepMin[1] = stepBase[1] * 0.1;
-			stepMax[0] = stepBase[0] * 10; stepMax[1] = stepBase[1] * 10;
-			adpcmDitherSig[0] = Select.ar(adpcmDither[0], [DC.ar(0), WhiteNoise.ar(adpcmStateL[2] * 0.5)]);
-			adpcmDitherSig[1] = Select.ar(adpcmDither[1], [DC.ar(0), WhiteNoise.ar(adpcmStateR[2] * 0.5)]);
-			adpcmDiff[0] = write[0] + nsFb[0] + adpcmDitherSig[0] - adpcmPredVal[0];
-			adpcmDiff[1] = write[1] + nsFb[1] + adpcmDitherSig[1] - adpcmPredVal[1];
-			adpcmQDiff[0] = (adpcmDiff[0] / adpcmStateL[2].max(0.0001)).round(0.5.pow(adpcmBits[0])) * adpcmStateL[2];
-			adpcmQDiff[1] = (adpcmDiff[1] / adpcmStateR[2].max(0.0001)).round(0.5.pow(adpcmBits[1])) * adpcmStateR[2];
-			adpcmDecoded[0] = adpcmPredVal[0] + adpcmQDiff[0];
-			adpcmDecoded[1] = adpcmPredVal[1] + adpcmQDiff[1];
-			stepMult[0] = (adpcmQDiff[0].abs / adpcmStateL[2].max(0.0001)).clip(0, 10) * 0.3 + 0.8;
-			stepMult[1] = (adpcmQDiff[1].abs / adpcmStateR[2].max(0.0001)).clip(0, 10) * 0.3 + 0.8;
-			newStep[0] = (adpcmStateL[2] * 0.98 + (adpcmStateL[2] * stepMult[0] - adpcmStateL[2]) * 0.5).clip(stepMin[0], stepMax[0]);
-			newStep[1] = (adpcmStateR[2] * 0.98 + (adpcmStateR[2] * stepMult[1] - adpcmStateR[2]) * 0.5).clip(stepMin[1], stepMax[1]);
-			
-			// SELECT FINAL PATH
-			writeQ[0] = Select.ar(isUlaw[0], [Select.ar(isAdpcm[0], [write[0].round(0.5.pow(quantBits[0])), adpcmDecoded[0]]), ulawExp[0]]);
-			writeQ[1] = Select.ar(isUlaw[1], [Select.ar(isAdpcm[1], [write[1].round(0.5.pow(quantBits[1])), adpcmDecoded[1]]), ulawExp[1]]);
-			
-			// SR REDUCTION
-			writeQ[0] = Select.ar(is8L + isUlaw[0] + isAdpcm[0], [writeQ[0], Latch.ar(writeQ[0], Impulse.ar((baseSR[0] * finalRate[0].abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmt[0]))))]);
-			writeQ[1] = Select.ar(is8R + isUlaw[1] + isAdpcm[1], [writeQ[1], Latch.ar(writeQ[1], Impulse.ar((baseSR[1] * finalRate[1].abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmt[1]))))]);
-			
-			BufWr.ar(writeQ[0], bufL, ptr[0]); BufWr.ar(writeQ[1], bufR, ptr[1]);
+			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellow[0], yellow[1], src11_ar, src12_ar,
-				nsError[0], nsError[1], nsError[2], nsError[3],
-				adpcmDecoded[0], adpcmDecoded[1], newStep[0], newStep[1], adpcmStateL[0], adpcmStateR[0]]);
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
 			osc_trigger = Impulse.kr(30);
-			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptr[0]/end[0].max(1)), A2K.kr(ptr[1]/end[1].max(1)), A2K.kr(gateRec[0]), A2K.kr(gateRec[1]), K2A.ar(flipState[0]), K2A.ar(flipState[1]), K2A.ar((skipL + mod_val_skip[0]).clip(0,1)), K2A.ar((skipR + mod_val_skip[1]).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellow[0]), A2K.kr(yellow[1]), K2A.ar(finalRate[0]), K2A.ar(finalRate[1]), A2K.kr(Amplitude.ar(read[0]*ampL)), A2K.kr(Amplitude.ar(read[1]*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
+			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
             // BRIDGE: OUTPUT TO BUSES
-			Out.ar(bus_tape_out, [read[0], read[1]]);
-			Out.ar(bus_mon_out, [clean_preamp[0] + mod_val_audioIn[0], clean_preamp[1] + mod_val_audioIn[1]]);
-			Out.ar(bus_bleed_out, [bleed[0], bleed[1]]); // [NEW] Send Bleed separately
-			Out.kr(bus_mvol_out, [mod_val_vol[0], mod_val_vol[1]]);
-			Out.kr(bus_mfilt_out, [mod_val_filt[0], mod_val_filt[1]]);
+            Out.ar(bus_tape_out, [readL, readR]);
+            Out.ar(bus_mon_out, [clean_preampL + mod_val_audioInL, clean_preampR + mod_val_audioInR]);
+            Out.ar(bus_bleed_out, [bleedL, bleedR]); // [NEW] Send Bleed separately
+            Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]);
+            Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]);
 
 		}).add;
 
@@ -473,19 +349,19 @@ Engine_Ncoco : CroneEngine {
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
             bleedPost=0, // [NEW] Param
             djFilterType=0, // [v2.04] 0=Classic LPF/HPF, 1=DFM1
-            dfm1Gain=0.15; // [v2.06] DFM1 gain compensation (2-stage LPF cascade, real-time adjustable)
+            dfm1Gain=0.32; // [v2.07] Analog filter gain compensation (2-stage LPF cascade, real-time adjustable)
 
             // --- VARS (ALL DECLARED AT TOP) ---
-			var readL, readR, monL, monR, bleedL, bleedR;
-			var mod_vol, mod_filt;
-			var mod_val_volL, mod_val_volR, mod_val_filtL, mod_val_filtR;
-			var totalFiltL, totalFiltR;
-			var lpfFreqL, hpfFreqL, lpfFreqR, hpfFreqR;
-			var classicL, classicR, dfm1L, dfm1R;
-			var finalVolL, finalVolR;
-			var master_out;
-			var tape_in, mon_in, bleed_in;
-			var sigL, sigR;
+            var readL, readR, monL, monR, bleedL, bleedR;
+            var mod_vol, mod_filt;
+            var mod_val_volL, mod_val_volR, mod_val_filtL, mod_val_filtR;
+            var totalFiltL, totalFiltR;
+            var lpfFreqL, hpfFreqL, lpfFreqR, hpfFreqR;
+            var classicL, classicR, dfm1L, dfm1R;
+            var finalVolL, finalVolR;
+            var master_out;
+            var tape_in, mon_in, bleed_in;
+            var sigL, sigR;
 
             // --- CODE BODY ---
             tape_in = In.ar(bus_tape_in, 2);
@@ -522,7 +398,7 @@ Engine_Ncoco : CroneEngine {
             classicL = HPF.ar(LPF.ar(sigL, lpfFreqL), hpfFreqL);
             classicR = HPF.ar(LPF.ar(sigR, lpfFreqR), hpfFreqR);
 
-            // [v2.06] DFM1 path: LPF×2 (pre-attenuated) + HPF always Classic
+// [v2.06] DFM1 path: LPF x2 (pre-attenuated) + HPF always Classic
             // L channel
             dfm1L = DFM1.ar(sigL * 0.7, lpfFreqL, 0, 1.0, 0, 0.0003);  // LPF stage 1 (pre-atten -3dB)
             dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);       // LPF stage 2
@@ -551,7 +427,7 @@ Engine_Ncoco : CroneEngine {
             
 			master_out = Pan2.ar(sigL*finalVolL, panL) + Pan2.ar(sigR*finalVolR, panR);
             
-			Out.ar(out, Limiter.ar(master_out + [monL * monitorLevel, monR * monitorLevel], 0.95)); 
+            Out.ar(out, Limiter.ar(master_out + [monL * monitorLevel, monR * monitorLevel], 0.95)); 
         }).add;
 
 		// BARRIER 2

@@ -1,9 +1,4 @@
--- lib/param_set.lua v2.08
--- CHANGELOG v2.08:
--- 1. NEW: 5th bit-depth mode "ADPCM" added.
--- 2. NEW: Added dither, noise_shape, adpcm_bits, adpcm_pred params (hide/show per mode).
--- 3. NEW: update_bitdepth() helper encodes all sub-params into bitDepth float.
--- 4. CFG: Zero new engine commands — all routed through existing bitDepth engine command.
+-- lib/param_set.lua v2.07
 -- CHANGELOG v2.07:
 -- 1. RENAME: "DFM1" label renamed to "Analog" in DJ Filter.
 -- 2. TWEAK: Default gain 0.32 (was 0.15).
@@ -93,34 +88,12 @@ function Params.init(SC, G)
     if t==2 or t==3 then engine.clear_tape(1) end
   end)
 
-  -- --- HELPER: Encode bitDepth from sub-params ---
-  local function update_bitdepth(ch, side)
-     local bits_idx = params:get("bits"..side)
-     local bd
-     if bits_idx == 1 then bd = 8
-     elseif bits_idx == 2 then bd = 12
-     elseif bits_idx == 3 then bd = 16
-     elseif bits_idx == 4 then
-        -- μ-law: encode dither+NS in fractional part
-        local d = params:get("dither"..side) - 1       -- 0/1
-        local ns = params:get("noise_shape"..side) - 1  -- 0/1/2
-        bd = 6 + d * 0.1 + ns * 0.01
-     else  -- bits_idx == 5 (ADPCM)
-        local ab_val = params:get("adpcm_bits"..side) + 3  -- 4/5/6
-        local pr = params:get("adpcm_pred"..side)          -- 1/2
-        local d = params:get("dither"..side) - 1           -- 0/1
-        local ns = params:get("noise_shape"..side) - 1     -- 0/1/2
-        bd = 7 + ab_val * 0.01 + pr * 0.001 + d * 0.0001 + ns * 0.00001
-     end
-     SC.set_bitdepth(ch, bd)
-  end
-
   -- 2. COCO CHANNEL STRIPS
   for i=1, 2 do
     local s = (i==1) and "L" or "R"
     local num = (i==1) and "1" or "2"
     
-    params:add_group("COCO "..num, 21)  -- Increased from 17 to 21 for new params
+    params:add_group("COCO "..num, 17) 
     
     params:add_control("vol_"..string.lower(s), "Volume "..num, controlspec.new(0, 2.0, "lin", 0, 1.0))
     params:set_action("vol_"..string.lower(s), function(x) SC.set_amp(i, x) end)
@@ -145,47 +118,12 @@ function Params.init(SC, G)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-    params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "16bit", "μ-law", "ADPCM"}, 1)
-    params:set_action("bits"..s, function(x)
-       update_bitdepth(i, s)
-       -- Show/hide sub-params based on mode
-       if x == 4 then  -- μ-law
-          params:show("dither"..s)
-          params:show("noise_shape"..s)
-          params:hide("adpcm_bits"..s)
-          params:hide("adpcm_pred"..s)
-       elseif x == 5 then  -- ADPCM
-          params:show("dither"..s)
-          params:show("noise_shape"..s)
-          params:show("adpcm_bits"..s)
-          params:show("adpcm_pred"..s)
-       else  -- linear modes (8/12/16)
-          params:hide("dither"..s)
-          params:hide("noise_shape"..s)
-          params:hide("adpcm_bits"..s)
-          params:hide("adpcm_pred"..s)
-       end
-       _menu.rebuild_params()
+    params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "16bit"}, 1)
+    params:set_action("bits"..s, function(x) 
+       local b = (x==1) and 8 or ((x==2) and 12 or 16)
+       SC.set_bitdepth(i,b) 
     end)
     
-    -- [v2.08] NEW: Sub-params for μ-law and ADPCM
-    params:add_option("dither"..s, "Dither "..num, {"Off", "On"}, 1)
-    params:set_action("dither"..s, function(x) update_bitdepth(i, s) end)
-    params:hide("dither"..s)
-    
-    params:add_option("noise_shape"..s, "Noise Shaping "..num, {"Off", "1st Order", "2nd Order"}, 1)
-    params:set_action("noise_shape"..s, function(x) update_bitdepth(i, s) end)
-    params:hide("noise_shape"..s)
-    
-    params:add_option("adpcm_bits"..s, "ADPCM Bits "..num, {"4bit", "5bit", "6bit"}, 3)
-    params:set_action("adpcm_bits"..s, function(x) update_bitdepth(i, s) end)
-    params:hide("adpcm_bits"..s)
-    
-    params:add_option("adpcm_pred"..s, "Predictor "..num, {"1st Order", "2nd Order"}, 2)
-    params:set_action("adpcm_pred"..s, function(x) update_bitdepth(i, s) end)
-    params:hide("adpcm_pred"..s)
-    -- [END v2.08]
-
     params:add_option("coco"..num.."_out_mode", "Out Mode "..num, {"Envelope", "Audio"}, 1)
     params:set_action("coco"..num.."_out_mode", function(x)
        SC.set_coco_out_mode(i, x-1) 
