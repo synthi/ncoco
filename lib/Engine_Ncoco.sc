@@ -1,10 +1,10 @@
-// Engine_Ncoco.sc v2.51
-// CHANGELOG v2.51 (FORENSIC REBUILD):
-// 1. INTEGRATION: 5 bit-depth modes (8b, 12b, 16b, ulaw, adpcm) built on stable v2.06 architecture.
-// 2. FIX: Strict rate compliance for Select.ar (K2A.ar indices) and Select.kr (scalar arrays).
-// 3. FIX: ADPCM state matrix uses DC.ar arrays to prevent A2K downsampling destruction.
-// 4. FIX: SendReply.kr payload strictly downsampled via A2K.kr to prevent UDP port blocking.
-// 5. FIX: Latent v2.06 Select.ar rate mismatches resolved (djFilterType, skipMode, p1shape).
+// Engine_Ncoco.sc v2.52
+// CHANGELOG v2.52:
+// 1. PARADIGM SHIFT: Encode on Write, Decode on Read. Tape stores raw compressed bits.
+// 2. DSP: True μ-law with 1st order noise shaping and triangular dither.
+// 3. DSP: 6-bit ADPCM with 2nd order predictor, adaptive dither, and leaky G.726 step.
+// 4. ARCHITECTURE: LocalIn expanded to 24 channels to physically separate Encode/Decode memory.
+// 5. PURITY: v2.06 Out.kr routing preserved exactly as requested (warnings ignored).
 
 Engine_Ncoco : CroneEngine {
 	var <synth_core, <synth_out;
@@ -18,11 +18,9 @@ Engine_Ncoco : CroneEngine {
 	}
 
 	alloc {
-		// 1. Allocate RAM & BUSES
 		bufL = Buffer.alloc(context.server, 48000 * 60, 1);
 		bufR = Buffer.alloc(context.server, 48000 * 60, 1);
 		
-		// Internal Interconnects
 		b_tape = Bus.audio(context.server, 2);      
 		b_mon = Bus.audio(context.server, 2);       
 		b_bleed = Bus.audio(context.server, 2);     
@@ -31,14 +29,10 @@ Engine_Ncoco : CroneEngine {
 		
 		norns_addr = NetAddr("127.0.0.1", 10111);
 		
-		// Barrier 1
 		context.server.sync;
 		bufL.zero; bufR.zero;
 		context.server.sync;
 
-		// -----------------------------------------------------------
-		// SYNTH 1: CORE
-		// -----------------------------------------------------------
 		SynthDef(\NcocoCore, {
 			arg bufL, bufR, inL, inR,
 			bus_tape_out, bus_mon_out, bus_bleed_out, 
@@ -69,7 +63,6 @@ Engine_Ncoco : CroneEngine {
 
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
 
-			// --- VARS ---
 			var dest_gains = NamedControl.kr(\dest_gains, 1!24); 
 			
 			var mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!12); 
@@ -131,17 +124,50 @@ Engine_Ncoco : CroneEngine {
             var fb_src11, fb_src12; 
 			var isNot16BitL, isNot16BitR;
 			
-			var adpcmStepL, adpcmPredL, adpcmDiffL, adpcmQuantL, adpcmReconL, adpcmNewStepL, adpcmNewPredL;
-			var adpcmStepR, adpcmPredR, adpcmDiffR, adpcmQuantR, adpcmReconR, adpcmNewStepR, adpcmNewPredR;
-			var isAdpcmL, isAdpcmR;
+			// Memory State Vars (24 channels total)
+			var isUlawL, isUlawR, isAdpcmL, isAdpcmR;
+			var fb_ulaw_errL, fb_ulaw_errR;
+			var fb_enc_stepL, fb_enc_prev1L, fb_enc_prev2L;
+			var fb_enc_stepR, fb_enc_prev1R, fb_enc_prev2R;
+			var fb_dec_stepL, fb_dec_prev1L, fb_dec_prev2L;
+			var fb_dec_stepR, fb_dec_prev1R, fb_dec_prev2R;
+			
+			// DSP Vars
+			var ulaw_compL, ulaw_ditherL, ulaw_err_inL, ulaw_quantL, ulaw_new_errL, ulaw_decL;
+			var ulaw_compR, ulaw_ditherR, ulaw_err_inR, ulaw_quantR, ulaw_new_errR, ulaw_decR;
+			var adpcm_predL, adpcm_diffL, adpcm_ditherL, adpcm_quantL, adpcm_reconL, step_multL, adpcm_new_stepL;
+			var adpcm_predR, adpcm_diffR, adpcm_ditherR, adpcm_quantR, adpcm_reconR, step_multR, adpcm_new_stepR;
+			var adpcm_dec_predL, adpcm_dec_outL, dec_step_multL, adpcm_dec_new_stepL;
+			var adpcm_dec_predR, adpcm_dec_outR, dec_step_multR, adpcm_dec_new_stepR;
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(14);
+            feedback_in = LocalIn.ar(24);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
             fb_src11 = feedback_in[8];
             fb_src12 = feedback_in[9];
+            
+            isUlawL = K2A.ar((modeL > 2.5) * (modeL < 3.5));
+            isUlawR = K2A.ar((modeR > 2.5) * (modeR < 3.5));
+            isAdpcmL = K2A.ar(modeL > 3.5);
+            isAdpcmR = K2A.ar(modeR > 3.5);
+
+			// Map Memory (Zeroed out when mode is inactive to prevent background explosions)
+			fb_ulaw_errL = feedback_in[10] * isUlawL;
+			fb_ulaw_errR = feedback_in[11] * isUlawR;
+			fb_enc_stepL = feedback_in[12].max(0.001);
+			fb_enc_prev1L = feedback_in[13] * isAdpcmL;
+			fb_enc_prev2L = feedback_in[14] * isAdpcmL;
+			fb_enc_stepR = feedback_in[15].max(0.001);
+			fb_enc_prev1R = feedback_in[16] * isAdpcmR;
+			fb_enc_prev2R = feedback_in[17] * isAdpcmR;
+			fb_dec_stepL = feedback_in[18].max(0.001);
+			fb_dec_prev1L = feedback_in[19] * isAdpcmL;
+			fb_dec_prev2L = feedback_in[20] * isAdpcmL;
+			fb_dec_stepR = feedback_in[21].max(0.001);
+			fb_dec_prev1R = feedback_in[22] * isAdpcmR;
+			fb_dec_prev2R = feedback_in[23] * isAdpcmR;
 
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
@@ -254,22 +280,43 @@ Engine_Ncoco : CroneEngine {
 			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * Select.kr(modeL, [0.0025, 0.001, 0, 0.002, 0.003]);
 			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * Select.kr(modeR, [0.0025, 0.001, 0, 0.002, 0.003]);
 
+			// ==========================================
+			// READ PHASE (DECODE)
+			// ==========================================
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
 			
+			// μ-law Decode (True Math)
+			ulaw_decL = readL.sign * ((256.pow(readL.abs) - 1) / 255);
+			ulaw_decR = readR.sign * ((256.pow(readR.abs) - 1) / 255);
+
+			// ADPCM Decode L (2nd Order)
+			adpcm_dec_predL = (2 * fb_dec_prev1L) - fb_dec_prev2L;
+			adpcm_dec_outL = adpcm_dec_predL + (readL * fb_dec_stepL);
+			dec_step_multL = 0.9 + (readL.abs * 0.6);
+			adpcm_dec_new_stepL = (fb_dec_stepL * 0.995) + (fb_dec_stepL * dec_step_multL * 0.005);
+			adpcm_dec_new_stepL = adpcm_dec_new_stepL.clip(0.001, 0.5);
+
+			// ADPCM Decode R (2nd Order)
+			adpcm_dec_predR = (2 * fb_dec_prev1R) - fb_dec_prev2R;
+			adpcm_dec_outR = adpcm_dec_predR + (readR * fb_dec_stepR);
+			dec_step_multR = 0.9 + (readR.abs * 0.6);
+			adpcm_dec_new_stepR = (fb_dec_stepR * 0.995) + (fb_dec_stepR * dec_step_multR * 0.005);
+			adpcm_dec_new_stepR = adpcm_dec_new_stepR.clip(0.001, 0.5);
+
 			readL = Select.ar(K2A.ar(modeL), [
 				readL,  
 				readL,  
 				readL,  
-				(readL.sign * (((2.pow(readL.abs * 128)) - 1) / 255)),  
-				adpcmReconL                                               
+				ulaw_decL,  
+				adpcm_dec_outL                                               
 			]);
 			readR = Select.ar(K2A.ar(modeR), [
 				readR,
 				readR,
 				readR,
-				(readR.sign * (((2.pow(readR.abs * 128)) - 1) / 255)),
-				adpcmReconR
+				ulaw_decR,
+				adpcm_dec_outR
 			]);
 
             readL = readL + (noiseL * 0.5); 
@@ -315,42 +362,57 @@ Engine_Ncoco : CroneEngine {
 			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
 			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
-			isAdpcmL = modeL > 3.5;
-			isAdpcmR = modeR > 3.5;
+			// ==========================================
+			// WRITE PHASE (ENCODE)
+			// ==========================================
+			
+			// μ-law Encode L (True Math + 1st Order Noise Shaping + Triangular Dither)
+			ulaw_compL = writeL.sign * (log(1 + (255 * writeL.abs)) / log(256));
+			ulaw_err_inL = ulaw_compL + fb_ulaw_errL;
+			ulaw_ditherL = (WhiteNoise.ar + WhiteNoise.ar) * (0.5 / 128);
+			ulaw_quantL = (ulaw_err_inL + ulaw_ditherL).round(1/128).clip(-1, 1);
+			ulaw_new_errL = ulaw_err_inL - ulaw_quantL;
 
-			// L channel ADPCM
-			adpcmStepL = (feedback_in[10] * isAdpcmL).max(1);
-			adpcmPredL = feedback_in[11] * isAdpcmL;
-			adpcmDiffL = writeL - adpcmPredL;
-			adpcmQuantL = (adpcmDiffL / (adpcmStepL * 0.00143)).clip(-7, 7).round(1);
-			adpcmReconL = adpcmPredL + (adpcmQuantL * adpcmStepL * 0.00143);
-			adpcmNewStepL = (adpcmStepL * Select.ar(adpcmQuantL + 7,
-				[DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.95), DC.ar(0.95), DC.ar(1.0), DC.ar(1.0), DC.ar(1.0), DC.ar(1.05), DC.ar(1.05), DC.ar(1.1), DC.ar(1.15), DC.ar(1.2), DC.ar(1.3), DC.ar(1.5)])).clip(1, 500);
-			adpcmNewPredL = adpcmReconL.clip(-1, 1);
+			// μ-law Encode R
+			ulaw_compR = writeR.sign * (log(1 + (255 * writeR.abs)) / log(256));
+			ulaw_err_inR = ulaw_compR + fb_ulaw_errR;
+			ulaw_ditherR = (WhiteNoise.ar + WhiteNoise.ar) * (0.5 / 128);
+			ulaw_quantR = (ulaw_err_inR + ulaw_ditherR).round(1/128).clip(-1, 1);
+			ulaw_new_errR = ulaw_err_inR - ulaw_quantR;
 
-			// R channel ADPCM
-			adpcmStepR = (feedback_in[12] * isAdpcmR).max(1);
-			adpcmPredR = feedback_in[13] * isAdpcmR;
-			adpcmDiffR = writeR - adpcmPredR;
-			adpcmQuantR = (adpcmDiffR / (adpcmStepR * 0.00143)).clip(-7, 7).round(1);
-			adpcmReconR = adpcmPredR + (adpcmQuantR * adpcmStepR * 0.00143);
-			adpcmNewStepR = (adpcmStepR * Select.ar(adpcmQuantR + 7,
-				[DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.9), DC.ar(0.95), DC.ar(0.95), DC.ar(1.0), DC.ar(1.0), DC.ar(1.0), DC.ar(1.05), DC.ar(1.05), DC.ar(1.1), DC.ar(1.15), DC.ar(1.2), DC.ar(1.3), DC.ar(1.5)])).clip(1, 500);
-			adpcmNewPredR = adpcmReconR.clip(-1, 1);
+			// ADPCM Encode L (6-bit, 2nd Order, Adaptive Dither)
+			adpcm_predL = (2 * fb_enc_prev1L) - fb_enc_prev2L;
+			adpcm_diffL = writeL - adpcm_predL;
+			adpcm_ditherL = WhiteNoise.ar * fb_enc_stepL * 0.5;
+			adpcm_quantL = ((adpcm_diffL + adpcm_ditherL) / fb_enc_stepL).round(1/32).clip(-1, 1);
+			adpcm_reconL = adpcm_predL + (adpcm_quantL * fb_enc_stepL);
+			step_multL = 0.9 + (adpcm_quantL.abs * 0.6);
+			adpcm_new_stepL = (fb_enc_stepL * 0.995) + (fb_enc_stepL * step_multL * 0.005);
+			adpcm_new_stepL = adpcm_new_stepL.clip(0.001, 0.5);
+
+			// ADPCM Encode R
+			adpcm_predR = (2 * fb_enc_prev1R) - fb_enc_prev2R;
+			adpcm_diffR = writeR - adpcm_predR;
+			adpcm_ditherR = WhiteNoise.ar * fb_enc_stepR * 0.5;
+			adpcm_quantR = ((adpcm_diffR + adpcm_ditherR) / fb_enc_stepR).round(1/32).clip(-1, 1);
+			adpcm_reconR = adpcm_predR + (adpcm_quantR * fb_enc_stepR);
+			step_multR = 0.9 + (adpcm_quantR.abs * 0.6);
+			adpcm_new_stepR = (fb_enc_stepR * 0.995) + (fb_enc_stepR * step_multR * 0.005);
+			adpcm_new_stepR = adpcm_new_stepR.clip(0.001, 0.5);
 
 			writeL = Select.ar(K2A.ar(modeL), [
 				writeL.round(0.5**8),   
 				writeL.round(0.5**12),  
 				writeL.round(0.5**16),  
-				(writeL.sign * ((log(1 + (255 * writeL.abs)) / log(256)).round(1/128))), 
-				adpcmQuantL / 7          
+				ulaw_quantL, 
+				adpcm_quantL          
 			]);
 			writeR = Select.ar(K2A.ar(modeR), [
 				writeR.round(0.5**8),
 				writeR.round(0.5**12),
 				writeR.round(0.5**16),
-				(writeR.sign * ((log(1 + (255 * writeR.abs)) / log(256)).round(1/128))),
-				adpcmQuantR / 7
+				ulaw_quantR,
+				adpcm_quantR
 			]);
 			
 			isNot16BitL = (modeL < 1.5) + (modeL > 2.5);
@@ -361,8 +423,15 @@ Engine_Ncoco : CroneEngine {
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar,
-				adpcmNewStepL, adpcmNewPredL, adpcmNewStepR, adpcmNewPredR]);
+			// Feedback 24 Channels
+			LocalOut.ar([
+				p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar,
+				ulaw_new_errL, ulaw_new_errR,
+				adpcm_new_stepL, adpcm_reconL.clip(-1, 1), fb_enc_prev1L,
+				adpcm_new_stepR, adpcm_reconR.clip(-1, 1), fb_enc_prev1R,
+				adpcm_dec_new_stepL, adpcm_dec_outL.clip(-1, 1), fb_dec_prev1L,
+				adpcm_dec_new_stepR, adpcm_dec_outR.clip(-1, 1), fb_dec_prev1R
+			]);
 				
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), A2K.kr(flipStateL), A2K.kr(flipStateR), A2K.kr((skipL + mod_val_skipL).clip(0,1)), A2K.kr((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), A2K.kr(finalRateL), A2K.kr(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
@@ -371,8 +440,8 @@ Engine_Ncoco : CroneEngine {
             Out.ar(bus_tape_out, [readL, readR]);
             Out.ar(bus_mon_out, [clean_preampL + mod_val_audioInL, clean_preampR + mod_val_audioInR]);
             Out.ar(bus_bleed_out, [bleedL, bleedR]); 
-            Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]);
-            Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]);
+            Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]); // V2.06 PURITY: No A2K.kr
+            Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]); // V2.06 PURITY: No A2K.kr
 
 		}).add;
 
@@ -455,7 +524,6 @@ Engine_Ncoco : CroneEngine {
             Out.ar(out, Limiter.ar(master_out + [monL * monitorLevel, monR * monitorLevel], 0.95)); 
         }).add;
 
-		// BARRIER 2
 		context.server.sync;
 		
 		synth_core = Synth.new(\NcocoCore, [
