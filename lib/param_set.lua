@@ -1,8 +1,4 @@
--- lib/param_set.lua v2.50
--- CHANGELOG v2.50:
--- 1. NEW: 5 bit-depth modes (8bit, 12bit, 16bit, μ-law, ADPCM)
--- 2. RENAME: bits option expanded from 3 to 5 items
--- 3. CHANGE: set_bitdepth -> set_mode (0-4 index)
+-- lib/param_set.lua v2.07
 -- CHANGELOG v2.07:
 -- 1. RENAME: "DFM1" label renamed to "Analog" in DJ Filter.
 -- 2. TWEAK: Default gain 0.32 (was 0.15).
@@ -122,10 +118,10 @@ function Params.init(SC, G)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-    -- [v2.50] 5 bit-depth modes: 8bit, 12bit, 16bit, μ-law, ADPCM
-    params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "16bit", "μ-law", "ADPCM"}, 1)
+    params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "16bit"}, 1)
     params:set_action("bits"..s, function(x) 
-       SC.set_mode(i, x-1)  -- x: 1-5, mode: 0-4
+       local b = (x==1) and 8 or ((x==2) and 12 or 16)
+       SC.set_bitdepth(i,b) 
     end)
     
     params:add_option("coco"..num.."_out_mode", "Out Mode "..num, {"Envelope", "Audio"}, 1)

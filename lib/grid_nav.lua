@@ -1,6 +1,4 @@
--- lib/grid_nav.lua v2.50
--- CHANGELOG v2.50:
--- 1. META: Version bump to 2.50 (project-wide alignment).
+-- lib/grid_nav.lua v2.03
 -- CHANGELOG v2.03:
 -- 1. FIX: Added 10000 event limit per sequencer to prevent memory leaks.
 -- CHANGELOG v2.02:

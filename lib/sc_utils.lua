@@ -1,6 +1,8 @@
--- lib/sc_utils.lua v2.50
--- CHANGELOG v2.50:
--- 1. REPLACE: set_bitdepth -> set_mode (mode: 0=8bit, 1=12bit, 2=16bit, 3=ulaw, 4=adpcm)
+-- lib/sc_utils.lua v2.01
+-- CHANGELOG v2.01:
+-- 1. META: Version bump to 2.01 (project-wide alignment).
+-- CHANGELOG v9004:
+-- 1. ADDED: set_coco_slew command with safety check.
 
 local SC = {}
 
@@ -51,9 +53,8 @@ function SC.set_feedback(id, val)
   if engine[cmd] then engine[cmd](val) end
 end
 
--- [v2.50] REPLACED: set_bitdepth -> set_mode
-function SC.set_mode(id, val)
-  local cmd = id==1 and "modeL" or "modeR"
+function SC.set_bitdepth(id, val)
+  local cmd = id==1 and "bitDepthL" or "bitDepthR"
   if engine[cmd] then engine[cmd](val) end
 end
 

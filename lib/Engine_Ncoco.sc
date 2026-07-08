@@ -1,15 +1,23 @@
-// Engine_Ncoco.sc v2.52
-// CHANGELOG v2.52:
-// 1. PARADIGM SHIFT: Encode on Write, Decode on Read. Tape stores raw compressed bits.
-// 2. DSP: True μ-law with 1st order noise shaping and triangular dither.
-// 3. DSP: 6-bit ADPCM with 2nd order predictor, adaptive dither, and leaky G.726 step.
-// 4. ARCHITECTURE: LocalIn expanded to 24 channels to physically separate Encode/Decode memory.
-// 5. PURITY: v2.06 Out.kr routing preserved exactly as requested (warnings ignored).
+// Engine_Ncoco.sc v2.06
+// CHANGELOG v2.06:
+// 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
+// 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes - 15kHz max, closes properly.
+// 3. TWEAK: Default DFM1 gain 0.15 (conservative for 2-stage LPF cascade).
+// CHANGELOG v2.04:
+// 1. ENHANCEMENT: DJ Filter now has DFM1 option (menu param, default=Classic).
+// 2. FIX: Removed dead ampL/ampR commands (overwritten by "both" commands below).
+// CHANGELOG v2.01:
+// 1. META: Version bump to 2.01 (project-wide alignment).
+// CHANGELOG v10017 (BLEED ROUTING):
+// 1. ARCHITECTURE: Added 'b_bleed' audio bus to transport Clock Noise separately from Core to Out.
+// 2. LOGIC: Added 'bleedPost' parameter in NcocoOut.
+//    - 0 (Pre): Bleed is mixed before the DJ Filter (gets dark).
+//    - 1 (Post): Bleed is mixed after the DJ Filter (stays bright/digital).
 
 Engine_Ncoco : CroneEngine {
 	var <synth_core, <synth_out;
 	var <bufL, <bufR;
-	var <b_tape, <b_mon, <b_bleed, <b_mod_vol, <b_mod_filt; 
+	var <b_tape, <b_mon, <b_bleed, <b_mod_vol, <b_mod_filt; // Added b_bleed
 	var <osc_responder; 
 	var <norns_addr;
 
@@ -18,31 +26,37 @@ Engine_Ncoco : CroneEngine {
 	}
 
 	alloc {
+		// 1. Allocate RAM & BUSES
 		bufL = Buffer.alloc(context.server, 48000 * 60, 1);
 		bufR = Buffer.alloc(context.server, 48000 * 60, 1);
 		
-		b_tape = Bus.audio(context.server, 2);      
-		b_mon = Bus.audio(context.server, 2);       
-		b_bleed = Bus.audio(context.server, 2);     
+		// Internal Interconnects
+		b_tape = Bus.audio(context.server, 2);      // Tape signal (Clean)
+		b_mon = Bus.audio(context.server, 2);       // Monitor signal
+		b_bleed = Bus.audio(context.server, 2);     // [NEW] Bleed signal isolated
 		b_mod_vol = Bus.control(context.server, 2); 
 		b_mod_filt = Bus.control(context.server, 2);
 		
 		norns_addr = NetAddr("127.0.0.1", 10111);
 		
+		// Barrier 1
 		context.server.sync;
 		bufL.zero; bufR.zero;
 		context.server.sync;
 
+		// -----------------------------------------------------------
+		// SYNTH 1: CORE
+		// -----------------------------------------------------------
 		SynthDef(\NcocoCore, {
 			arg bufL, bufR, inL, inR,
-			bus_tape_out, bus_mon_out, bus_bleed_out, 
+			bus_tape_out, bus_mon_out, bus_bleed_out, // Added bleed out
 			bus_mvol_out, bus_mfilt_out,
 			
 			recL=0, recR=0, fbL=0.85, fbR=0.85, speedL=1.0, speedR=1.0,     
 			flipL=0, flipR=0, skipL=0, skipR=0,           
 			volInL=1.0, volInR=1.0,     
 			
-			modeL=0, modeR=0,                   
+			bitDepthL=8, bitDepthR=8, interp=2,                   
             loopLenL=8.0, loopLenR=8.0,
 			
 			skipModeL=0, skipModeR=0, 
@@ -63,8 +77,10 @@ Engine_Ncoco : CroneEngine {
 
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
 
+			// --- VARS ---
 			var dest_gains = NamedControl.kr(\dest_gains, 1!24); 
 			
+			// Matrix Amounts
 			var mod_speedL_Amts=NamedControl.kr(\mod_speedL_Amts, 0!12); 
 			var mod_speedR_Amts=NamedControl.kr(\mod_speedR_Amts, 0!12);
 			var mod_flipL_Amts=NamedControl.kr(\mod_flipL_Amts, 0!12); 
@@ -90,6 +106,7 @@ Engine_Ncoco : CroneEngine {
 			var mod_p5_Amts=NamedControl.kr(\mod_p5_Amts, 0!12); 
 			var mod_p6_Amts=NamedControl.kr(\mod_p6_Amts, 0!12);
 
+			// Logic & Signals
 			var inputL_sig, inputR_sig, envL, envR, envL_raw, envR_raw;
 			var p1, p2, p3, p4, p5, p6, c1, c2, c3, c4, c5, c6; 
 			var b_ph1, b_ph2, b_ph3, b_ph4, b_ph5, b_ph6, t1, t2, t3, t4, t5, t6; 
@@ -106,7 +123,7 @@ Engine_Ncoco : CroneEngine {
 			
 			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR, readL, readR, writeL, writeR;
 			var gateRecL, gateRecR, noiseL, noiseR, baseSR_L, baseSR_R, interpL, interpR;
-			var fixedFiltFreqL, fixedFiltFreqR;
+			var is8L, is12L, is8R, is12R, fixedFiltFreqL, fixedFiltFreqR;
 			var endL, endR, yellowL, yellowR;
 			var driftL, driftR, bleedL, bleedR, baseSpeedL, baseSpeedR;
 			var flipLogicL, flipLogicR, flipStateL, flipStateR, recLogicL, recLogicR;
@@ -115,59 +132,22 @@ Engine_Ncoco : CroneEngine {
 			var gateSkipL, gateSkipR, freezePosL, freezePosR, rawPtrL, rawPtrR;
 			var minTime, maxTime, lowerL, upperL, lowerR, upperR;
 			var demandL, demandR, autoTrigL, autoTrigR, finalJumpTrigL, finalJumpTrigR;
-			var resetPosL, resetPosR;
+			var resetPosL, resetPosR, jitterAmountL, jitterAmountR;
             var clean_preampL, clean_preampR;
             var relInL, relInR, atkInL, atkInR; 
             var relCoL, relCoR, atkCoL, atkCoR; 
             var envFbL, envFbR;
             var src11_ar, src12_ar; 
             var fb_src11, fb_src12; 
-			var isNot16BitL, isNot16BitR;
-			
-			// Memory State Vars (24 channels total)
-			var isUlawL, isUlawR, isAdpcmL, isAdpcmR;
-			var fb_ulaw_errL, fb_ulaw_errR;
-			var fb_enc_stepL, fb_enc_prev1L, fb_enc_prev2L;
-			var fb_enc_stepR, fb_enc_prev1R, fb_enc_prev2R;
-			var fb_dec_stepL, fb_dec_prev1L, fb_dec_prev2L;
-			var fb_dec_stepR, fb_dec_prev1R, fb_dec_prev2R;
-			
-			// DSP Vars
-			var ulaw_compL, ulaw_ditherL, ulaw_err_inL, ulaw_quantL, ulaw_new_errL, ulaw_decL;
-			var ulaw_compR, ulaw_ditherR, ulaw_err_inR, ulaw_quantR, ulaw_new_errR, ulaw_decR;
-			var adpcm_predL, adpcm_diffL, adpcm_ditherL, adpcm_quantL, adpcm_reconL, step_multL, adpcm_new_stepL;
-			var adpcm_predR, adpcm_diffR, adpcm_ditherR, adpcm_quantR, adpcm_reconR, step_multR, adpcm_new_stepR;
-			var adpcm_dec_predL, adpcm_dec_outL, dec_step_multL, adpcm_dec_new_stepL;
-			var adpcm_dec_predR, adpcm_dec_outR, dec_step_multR, adpcm_dec_new_stepR;
+			var bleedAmpL, bleedAmpR;
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(24);
+            feedback_in = LocalIn.ar(10);
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
             fb_src11 = feedback_in[8];
             fb_src12 = feedback_in[9];
-            
-            isUlawL = K2A.ar((modeL > 2.5) * (modeL < 3.5));
-            isUlawR = K2A.ar((modeR > 2.5) * (modeR < 3.5));
-            isAdpcmL = K2A.ar(modeL > 3.5);
-            isAdpcmR = K2A.ar(modeR > 3.5);
-
-			// Map Memory (Zeroed out when mode is inactive to prevent background explosions)
-			fb_ulaw_errL = feedback_in[10] * isUlawL;
-			fb_ulaw_errR = feedback_in[11] * isUlawR;
-			fb_enc_stepL = feedback_in[12].max(0.001);
-			fb_enc_prev1L = feedback_in[13] * isAdpcmL;
-			fb_enc_prev2L = feedback_in[14] * isAdpcmL;
-			fb_enc_stepR = feedback_in[15].max(0.001);
-			fb_enc_prev1R = feedback_in[16] * isAdpcmR;
-			fb_enc_prev2R = feedback_in[17] * isAdpcmR;
-			fb_dec_stepL = feedback_in[18].max(0.001);
-			fb_dec_prev1L = feedback_in[19] * isAdpcmL;
-			fb_dec_prev2L = feedback_in[20] * isAdpcmL;
-			fb_dec_stepR = feedback_in[21].max(0.001);
-			fb_dec_prev1R = feedback_in[22] * isAdpcmR;
-			fb_dec_prev2R = feedback_in[23] * isAdpcmR;
 
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
@@ -185,15 +165,18 @@ Engine_Ncoco : CroneEngine {
 
             clean_preampL = inputL_sig; clean_preampR = inputR_sig;
 
-			noiseL = PinkNoise.ar(Select.kr(modeL, [0.008, 0.0016, 0.00016, 0.004, 0.002]));
-			noiseR = PinkNoise.ar(Select.kr(modeR, [0.008, 0.0016, 0.00016, 0.004, 0.002]));
+			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
+			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			
-			baseSR_L = Select.kr(modeL, [16000, 31250, 39000, 22000, 14000]);
-			baseSR_R = Select.kr(modeR, [16000, 31250, 39000, 22000, 14000]) * 1.002;
-            fixedFiltFreqL = Select.kr(modeL, [7000, 12800, 18000, 10000, 6500]);
+			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.0016) + ((1 - is8L - is12L) * 0.00016));
+			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.0016) + ((1 - is8R - is12R) * 0.00016));
+			
+			baseSR_L = (is8L * 16000) + (is12L * 31250) + ((1 - is8L - is12L) * 39000);
+			baseSR_R = ((is8R * 16000) + (is12R * 31250) + ((1 - is8R - is12R) * 39000)) * 1.002;
+            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + ((1 - is8L - is12L) * 18000);
             fixedFiltFreqR = fixedFiltFreqL * 1.04;
-            interpL = Select.kr(modeL, [1, 1, 2, 1, 1]);
-            interpR = Select.kr(modeR, [1, 1, 2, 1, 1]);
+            interpL = 1 + (1 - is8L - is12L); 
+            interpR = 1 + (1 - is8R - is12R);
 			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
             inputR_sig = inputR_sig + (noiseR * 0.5);
@@ -223,8 +206,8 @@ Engine_Ncoco : CroneEngine {
 			
 			c1=Latch.ar(p6,t1); c2=Latch.ar(p1,t2); c3=Latch.ar(p2,t3);
 			c4=Latch.ar(p3,t4); c5=Latch.ar(p4,t5); c6=Latch.ar(p5,t6);
-			out1=Select.ar(K2A.ar(p1shape),[p1,c1]); out2=Select.ar(K2A.ar(p2shape),[p2,c2]); out3=Select.ar(K2A.ar(p3shape),[p3,c3]);
-			out4=Select.ar(K2A.ar(p4shape),[p4,c4]); out5=Select.ar(K2A.ar(p5shape),[p5,c5]); out6=Select.ar(K2A.ar(p6shape),[p6,c6]);
+			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
+			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
 			
 			driftL = LFDNoise3.ar(0.08, driftAmt); driftR = LFDNoise3.ar(0.08, driftAmt);
 
@@ -263,72 +246,43 @@ Engine_Ncoco : CroneEngine {
 			demandR = Dwhite(lowerR, upperR);
 			autoTrigR = TDuty.ar(demandR, reset: K2A.ar(gateSkipR)) * K2A.ar(gateSkipR);
 			
-			finalJumpTrigL = Select.ar(K2A.ar(skipModeL), [Changed.ar(K2A.ar(gateSkipL)), autoTrigL]);
-			finalJumpTrigR = Select.ar(K2A.ar(skipModeR), [Changed.ar(K2A.ar(gateSkipR)), autoTrigR]);
+			finalJumpTrigL = Select.ar(skipModeL, [Changed.ar(K2A.ar(gateSkipL)), autoTrigL]);
+			finalJumpTrigR = Select.ar(skipModeR, [Changed.ar(K2A.ar(gateSkipR)), autoTrigR]);
 			
 			rawPtrL = fb_yellow[0] * endL; rawPtrR = fb_yellow[1] * endR;
 			freezePosL = Latch.ar(rawPtrL, K2A.ar(gateSkipL)); freezePosR = Latch.ar(rawPtrR, K2A.ar(gateSkipR));
 			
-			resetPosL = Select.ar(K2A.ar(skipModeL), [TRand.ar(0, endL, finalJumpTrigL), freezePosL]);
-			resetPosR = Select.ar(K2A.ar(skipModeR), [TRand.ar(0, endR, finalJumpTrigR), freezePosR]);
+			resetPosL = Select.ar(skipModeL, [TRand.ar(0, endL, finalJumpTrigL), freezePosL]);
+			resetPosR = Select.ar(skipModeR, [TRand.ar(0, endR, finalJumpTrigR), freezePosR]);
 			
 			ptrL = Phasor.ar(finalJumpTrigL, finalRateL * BufRateScale.kr(bufL), 0, endL, resetPosL);
 			ptrR = Phasor.ar(finalJumpTrigR, finalRateR * BufRateScale.kr(bufR), 0, endR, resetPosR);
 			
 			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
-			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * Select.kr(modeL, [0.0025, 0.001, 0, 0.002, 0.003]);
-			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * Select.kr(modeR, [0.0025, 0.001, 0, 0.002, 0.003]);
+            // Bleed Logic
+            bleedAmpL = (is8L * 0.0025) + (is12L * 0.001); 
+            bleedAmpR = (is8R * 0.0025) + (is12R * 0.001);
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * bleedAmpL;
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * bleedAmpR;
 
-			// ==========================================
-			// READ PHASE (DECODE)
-			// ==========================================
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: interpL);
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: interpR);
 			
-			// μ-law Decode (True Math)
-			ulaw_decL = readL.sign * ((256.pow(readL.abs) - 1) / 255);
-			ulaw_decR = readR.sign * ((256.pow(readR.abs) - 1) / 255);
-
-			// ADPCM Decode L (2nd Order)
-			adpcm_dec_predL = (2 * fb_dec_prev1L) - fb_dec_prev2L;
-			adpcm_dec_outL = adpcm_dec_predL + (readL * fb_dec_stepL);
-			dec_step_multL = 0.9 + (readL.abs * 0.6);
-			adpcm_dec_new_stepL = (fb_dec_stepL * 0.995) + (fb_dec_stepL * dec_step_multL * 0.005);
-			adpcm_dec_new_stepL = adpcm_dec_new_stepL.clip(0.001, 0.5);
-
-			// ADPCM Decode R (2nd Order)
-			adpcm_dec_predR = (2 * fb_dec_prev1R) - fb_dec_prev2R;
-			adpcm_dec_outR = adpcm_dec_predR + (readR * fb_dec_stepR);
-			dec_step_multR = 0.9 + (readR.abs * 0.6);
-			adpcm_dec_new_stepR = (fb_dec_stepR * 0.995) + (fb_dec_stepR * dec_step_multR * 0.005);
-			adpcm_dec_new_stepR = adpcm_dec_new_stepR.clip(0.001, 0.5);
-
-			readL = Select.ar(K2A.ar(modeL), [
-				readL,  
-				readL,  
-				readL,  
-				ulaw_decL,  
-				adpcm_dec_outL                                               
-			]);
-			readR = Select.ar(K2A.ar(modeR), [
-				readR,
-				readR,
-				readR,
-				ulaw_decR,
-				adpcm_dec_outR
-			]);
-
-            readL = readL + (noiseL * 0.5); 
+            // [FIX] Bleed is NOT mixed here anymore. It's sent to Out via b_bleed.
+            // readL = readL + bleedL + (noiseL * 0.5); // OLD
+            readL = readL + (noiseL * 0.5); // NEW: Only noise here
             readR = readR + (noiseR * 0.5);
 
+            // Coco Env Logic
             relCoL = cocoSlewL.linexp(0, 1, 0.05, 2.5); relCoR = cocoSlewR.linexp(0, 1, 0.05, 2.5);
             atkCoL = (relCoL * 0.1).max(0.002); atkCoR = (relCoR * 0.1).max(0.002);
             envFbL = Amplitude.kr(LeakDC.ar(readL), atkCoL, relCoL) * 2.0; 
             envFbR = Amplitude.kr(LeakDC.ar(readR), atkCoR, relCoR) * 2.0;
-            src11_ar = Select.ar(K2A.ar(coco1OutMode), [K2A.ar(envFbL), readL]);
-            src12_ar = Select.ar(K2A.ar(coco2OutMode), [K2A.ar(envFbR), readR]);
+            src11_ar = Select.ar(coco1OutMode, [K2A.ar(envFbL), readL]);
+            src12_ar = Select.ar(coco2OutMode, [K2A.ar(envFbR), readR]);
             
+            // Calc Modulations for Output
 			mod_val_ampL=((sources_sig*mod_ampL_Amts).sum * dest_gains[1]).tanh.lag(slew_amp);
 			mod_val_ampR=((sources_sig*mod_ampR_Amts).sum * dest_gains[8]).tanh.lag(slew_amp);
 			mod_val_fbL=((sources_sig*mod_fbL_Amts).sum * dest_gains[2]).tanh.lag(slew_amp);
@@ -348,8 +302,8 @@ Engine_Ncoco : CroneEngine {
 			mod_val_recR = Slew.ar(Schmidt.ar(raw_mod_recR, 0.6, 0.4), 10000, 20) > 0.01;
 
 			recLogicL = (recL + mod_val_recL).mod(2); recLogicR = (recR + mod_val_recR).mod(2);
-			gateRecL = Select.ar(recLogicL > 0.5, [DC.ar(0), DC.ar(1)]);
-			gateRecR = Select.ar(recLogicR > 0.5, [DC.ar(0), DC.ar(1)]);
+			gateRecL = Select.ar(recLogicL > 0.5, [K2A.ar(0), K2A.ar(1)]);
+			gateRecR = Select.ar(recLogicR > 0.5, [K2A.ar(0), K2A.ar(1)]);
 
 			dryL = inputL_sig * (volInL + mod_val_ampL).clip(0, 2);
 			dryR = inputR_sig * (volInR + mod_val_ampR).clip(0, 2);
@@ -362,86 +316,27 @@ Engine_Ncoco : CroneEngine {
 			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
 			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
-			// ==========================================
-			// WRITE PHASE (ENCODE)
-			// ==========================================
+			writeL = writeL.round(0.5 ** bitDepthL);
+			writeR = writeR.round(0.5 ** bitDepthR);
 			
-			// μ-law Encode L (True Math + 1st Order Noise Shaping + Triangular Dither)
-			ulaw_compL = writeL.sign * (log(1 + (255 * writeL.abs)) / log(256));
-			ulaw_err_inL = ulaw_compL + fb_ulaw_errL;
-			ulaw_ditherL = (WhiteNoise.ar + WhiteNoise.ar) * (0.5 / 128);
-			ulaw_quantL = (ulaw_err_inL + ulaw_ditherL).round(1/128).clip(-1, 1);
-			ulaw_new_errL = ulaw_err_inL - ulaw_quantL;
-
-			// μ-law Encode R
-			ulaw_compR = writeR.sign * (log(1 + (255 * writeR.abs)) / log(256));
-			ulaw_err_inR = ulaw_compR + fb_ulaw_errR;
-			ulaw_ditherR = (WhiteNoise.ar + WhiteNoise.ar) * (0.5 / 128);
-			ulaw_quantR = (ulaw_err_inR + ulaw_ditherR).round(1/128).clip(-1, 1);
-			ulaw_new_errR = ulaw_err_inR - ulaw_quantR;
-
-			// ADPCM Encode L (6-bit, 2nd Order, Adaptive Dither)
-			adpcm_predL = (2 * fb_enc_prev1L) - fb_enc_prev2L;
-			adpcm_diffL = writeL - adpcm_predL;
-			adpcm_ditherL = WhiteNoise.ar * fb_enc_stepL * 0.5;
-			adpcm_quantL = ((adpcm_diffL + adpcm_ditherL) / fb_enc_stepL).round(1/32).clip(-1, 1);
-			adpcm_reconL = adpcm_predL + (adpcm_quantL * fb_enc_stepL);
-			step_multL = 0.9 + (adpcm_quantL.abs * 0.6);
-			adpcm_new_stepL = (fb_enc_stepL * 0.995) + (fb_enc_stepL * step_multL * 0.005);
-			adpcm_new_stepL = adpcm_new_stepL.clip(0.001, 0.5);
-
-			// ADPCM Encode R
-			adpcm_predR = (2 * fb_enc_prev1R) - fb_enc_prev2R;
-			adpcm_diffR = writeR - adpcm_predR;
-			adpcm_ditherR = WhiteNoise.ar * fb_enc_stepR * 0.5;
-			adpcm_quantR = ((adpcm_diffR + adpcm_ditherR) / fb_enc_stepR).round(1/32).clip(-1, 1);
-			adpcm_reconR = adpcm_predR + (adpcm_quantR * fb_enc_stepR);
-			step_multR = 0.9 + (adpcm_quantR.abs * 0.6);
-			adpcm_new_stepR = (fb_enc_stepR * 0.995) + (fb_enc_stepR * step_multR * 0.005);
-			adpcm_new_stepR = adpcm_new_stepR.clip(0.001, 0.5);
-
-			writeL = Select.ar(K2A.ar(modeL), [
-				writeL.round(0.5**8),   
-				writeL.round(0.5**12),  
-				writeL.round(0.5**16),  
-				ulaw_quantL, 
-				adpcm_quantL          
-			]);
-			writeR = Select.ar(K2A.ar(modeR), [
-				writeR.round(0.5**8),
-				writeR.round(0.5**12),
-				writeR.round(0.5**16),
-				ulaw_quantR,
-				adpcm_quantR
-			]);
+			jitterAmountL = (is8L * 0.02) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.001);
+			jitterAmountR = (is8R * 0.02) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.001);
 			
-			isNot16BitL = (modeL < 1.5) + (modeL > 2.5);
-			isNot16BitR = (modeR < 1.5) + (modeR > 2.5);
-			
-			writeL = Select.ar(K2A.ar(isNot16BitL), [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeL, [0.02, 0.004, 0.001, 0.015, 0.01])))))]);
-			writeR = Select.ar(K2A.ar(isNot16BitR), [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeR, [0.02, 0.004, 0.001, 0.015, 0.01])))))]);
+			writeL = Select.ar(is8L + is12L, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountL))))]);
+			writeR = Select.ar(is8R + is12R, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(jitterAmountR))))]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			// Feedback 24 Channels
-			LocalOut.ar([
-				p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar,
-				ulaw_new_errL, ulaw_new_errR,
-				adpcm_new_stepL, adpcm_reconL.clip(-1, 1), fb_enc_prev1L,
-				adpcm_new_stepR, adpcm_reconR.clip(-1, 1), fb_enc_prev1R,
-				adpcm_dec_new_stepL, adpcm_dec_outL.clip(-1, 1), fb_dec_prev1L,
-				adpcm_dec_new_stepR, adpcm_dec_outR.clip(-1, 1), fb_dec_prev1R
-			]);
-				
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
 			osc_trigger = Impulse.kr(30);
-			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), A2K.kr(flipStateL), A2K.kr(flipStateR), A2K.kr((skipL + mod_val_skipL).clip(0,1)), A2K.kr((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), A2K.kr(finalRateL), A2K.kr(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
+			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
             // BRIDGE: OUTPUT TO BUSES
             Out.ar(bus_tape_out, [readL, readR]);
             Out.ar(bus_mon_out, [clean_preampL + mod_val_audioInL, clean_preampR + mod_val_audioInR]);
-            Out.ar(bus_bleed_out, [bleedL, bleedR]); 
-            Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]); // V2.06 PURITY: No A2K.kr
-            Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]); // V2.06 PURITY: No A2K.kr
+            Out.ar(bus_bleed_out, [bleedL, bleedR]); // [NEW] Send Bleed separately
+            Out.kr(bus_mvol_out, [mod_val_volL, mod_val_volR]);
+            Out.kr(bus_mfilt_out, [mod_val_filtL, mod_val_filtR]);
 
 		}).add;
 
@@ -449,13 +344,14 @@ Engine_Ncoco : CroneEngine {
 		// SYNTH 2: OUT (Mix, Filter, Amp)
 		// -----------------------------------------------------------
 		SynthDef(\NcocoOut, {
-            arg out, bus_tape_in, bus_mon_in, bus_bleed_in, 
+            arg out, bus_tape_in, bus_mon_in, bus_bleed_in, // Added bleed in
             bus_mvol_in, bus_mfilt_in,
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
-            bleedPost=0, 
-            djFilterType=0, 
-            dfm1Gain=0.32; 
+            bleedPost=0, // [NEW] Param
+            djFilterType=0, // [v2.04] 0=Classic LPF/HPF, 1=DFM1
+            dfm1Gain=0.32; // [v2.07] Analog filter gain compensation (2-stage LPF cascade, real-time adjustable)
 
+            // --- VARS (ALL DECLARED AT TOP) ---
             var readL, readR, monL, monR, bleedL, bleedR;
             var mod_vol, mod_filt;
             var mod_val_volL, mod_val_volR, mod_val_filtL, mod_val_filtR;
@@ -467,6 +363,7 @@ Engine_Ncoco : CroneEngine {
             var tape_in, mon_in, bleed_in;
             var sigL, sigR;
 
+            // --- CODE BODY ---
             tape_in = In.ar(bus_tape_in, 2);
             readL = tape_in[0]; readR = tape_in[1];
             
@@ -485,34 +382,43 @@ Engine_Ncoco : CroneEngine {
 			totalFiltL = (filtL + mod_val_filtL).clip(-1, 1);
 			totalFiltR = (filtR + mod_val_filtR).clip(-1, 1);
 
+            // [NEW] Bleed Routing Logic
+            // Pre-Filter Mix
             sigL = readL + (bleedL * (1.0 - bleedPost));
             sigR = readR + (bleedR * (1.0 - bleedPost));
 
+            // [v2.04] DJ Filter with Classic/DFM1 selection
+            // Frequency calculations (identical for both paths)
             lpfFreqL = (totalFiltL.min(0)+1).linexp(0,1,100,20000);
             hpfFreqL = totalFiltL.max(0).linexp(0,1,20,15000);
             lpfFreqR = (totalFiltR.min(0)+1).linexp(0,1,100,20000);
             hpfFreqR = totalFiltR.max(0).linexp(0,1,20,15000);
 
+            // Classic path (original LPF/HPF, 12dB/oct each)
             classicL = HPF.ar(LPF.ar(sigL, lpfFreqL), hpfFreqL);
             classicR = HPF.ar(LPF.ar(sigR, lpfFreqR), hpfFreqR);
 
-            dfm1L = DFM1.ar(sigL * 0.7, lpfFreqL, 0, 1.0, 0, 0.0003);  
-            dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);       
-            dfm1L = HPF.ar(dfm1L, hpfFreqL) * dfm1Gain;                  
-            
-            dfm1R = DFM1.ar(sigR * 0.7, lpfFreqR, 0, 1.0, 0, 0.0003);  
-            dfm1R = DFM1.ar(dfm1R, lpfFreqR, 0, 1.0, 0, 0.0003);       
-            dfm1R = HPF.ar(dfm1R, hpfFreqR) * dfm1Gain;                  
+// [v2.06] DFM1 path: LPF x2 (pre-attenuated) + HPF always Classic
+            // L channel
+            dfm1L = DFM1.ar(sigL * 0.7, lpfFreqL, 0, 1.0, 0, 0.0003);  // LPF stage 1 (pre-atten -3dB)
+            dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);       // LPF stage 2
+            dfm1L = HPF.ar(dfm1L, hpfFreqL) * dfm1Gain;                  // HPF Classic (same freq as Classic mode)
+            // R channel
+            dfm1R = DFM1.ar(sigR * 0.7, lpfFreqR, 0, 1.0, 0, 0.0003);  // LPF stage 1 (pre-atten -3dB)
+            dfm1R = DFM1.ar(dfm1R, lpfFreqR, 0, 1.0, 0, 0.0003);       // LPF stage 2
+            dfm1R = HPF.ar(dfm1R, hpfFreqR) * dfm1Gain;                  // HPF Classic (same freq as Classic mode)
 
-			sigL = Select.ar(K2A.ar(totalFiltL.abs < 0.05), [
-				Select.ar(K2A.ar(djFilterType), [classicL, dfm1L]),
+            // Select filter type when filter is active (|totalFilt| >= 0.05)
+			sigL = Select.ar(totalFiltL.abs < 0.05, [
+				Select.ar(djFilterType, [classicL, dfm1L]),
 				sigL
 			]);
-			sigR = Select.ar(K2A.ar(totalFiltR.abs < 0.05), [
-				Select.ar(K2A.ar(djFilterType), [classicR, dfm1R]),
+			sigR = Select.ar(totalFiltR.abs < 0.05, [
+				Select.ar(djFilterType, [classicR, dfm1R]),
 				sigR
 			]);
             
+            // Post-Filter Mix
             sigL = sigL + (bleedL * bleedPost);
             sigR = sigR + (bleedR * bleedPost);
             
@@ -524,12 +430,14 @@ Engine_Ncoco : CroneEngine {
             Out.ar(out, Limiter.ar(master_out + [monL * monitorLevel, monR * monitorLevel], 0.95)); 
         }).add;
 
+		// BARRIER 2
 		context.server.sync;
 		
+        // INSTANTIATE SPLIT SYNTHS
 		synth_core = Synth.new(\NcocoCore, [
             \bufL, bufL, \bufR, bufR, \inL, context.in_b[0].index, \inR, context.in_b[1].index,
             \bus_tape_out, b_tape.index, \bus_mon_out, b_mon.index,
-            \bus_bleed_out, b_bleed.index, 
+            \bus_bleed_out, b_bleed.index, // [NEW]
             \bus_mvol_out, b_mod_vol.index, \bus_mfilt_out, b_mod_filt.index,
             \ampL, 1.0, \ampR, 1.0 
         ], context.xg, \addToHead);
@@ -537,12 +445,14 @@ Engine_Ncoco : CroneEngine {
         synth_out = Synth.new(\NcocoOut, [
             \out, context.out_b.index,
             \bus_tape_in, b_tape.index, \bus_mon_in, b_mon.index,
-            \bus_bleed_in, b_bleed.index, 
+            \bus_bleed_in, b_bleed.index, // [NEW]
             \bus_mvol_in, b_mod_vol.index, \bus_mfilt_in, b_mod_filt.index
         ], context.xg, \addToTail);
 
+        // [FIX v10016] OSCFunc Promiscuous Mode (nil srcID)
 		osc_responder = OSCFunc({ |msg| NetAddr("127.0.0.1", 10111).sendMsg("/update", *msg.drop(3)); }, '/update', nil).fix;
 
+        // COMMANDS MAPPING (Split Routing)
 		this.addCommand("clear_tape", "i", { |msg| var b=if(msg[1]==0,{bufL},{bufR}); b.zero; });
 		this.addCommand("dest_gains", "ffffffffffffffffffffffff", { |msg| synth_core.setn(\dest_gains, msg.drop(1)) });
 		
@@ -565,6 +475,7 @@ Engine_Ncoco : CroneEngine {
 			}
 		});
 
+        // PARAMS -> CORE
         this.addCommand("coco1_out_mode", "i", { |msg| synth_core.set(\coco1OutMode, msg[1]) });
         this.addCommand("coco2_out_mode", "i", { |msg| synth_core.set(\coco2OutMode, msg[1]) });
         this.addCommand("global_chaos", "f", { |msg| synth_core.set(\globalChaos, msg[1]) });
@@ -591,8 +502,8 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("flipR", "i", { |msg| synth_core.set(\flipR, msg[1]) });
 		this.addCommand("skipL", "i", { |msg| synth_core.set(\skipL, msg[1]) });
 		this.addCommand("skipR", "i", { |msg| synth_core.set(\skipR, msg[1]) });
-		this.addCommand("modeL", "f", { |msg| synth_core.set(\modeL, msg[1]) });
-		this.addCommand("modeR", "f", { |msg| synth_core.set(\modeR, msg[1]) });
+		this.addCommand("bitDepthL", "f", { |msg| synth_core.set(\bitDepthL, msg[1]) });
+		this.addCommand("bitDepthR", "f", { |msg| synth_core.set(\bitDepthR, msg[1]) });
 		this.addCommand("slew_speed", "f", { |msg| synth_core.set(\slew_speed, msg[1]) });
 		this.addCommand("preampL", "f", { |msg| synth_core.set(\preampL, msg[1]) });
 		this.addCommand("preampR", "f", { |msg| synth_core.set(\preampR, msg[1]) });
@@ -618,15 +529,17 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("p5shape", "f", { |msg| synth_core.set(\p5shape, msg[1]) });
 		this.addCommand("p6shape", "f", { |msg| synth_core.set(\p6shape, msg[1]) });
 
+        // PARAMS -> OUT
 		this.addCommand("filtL", "f", { |msg| synth_out.set(\filtL, msg[1]) });
 		this.addCommand("filtR", "f", { |msg| synth_out.set(\filtR, msg[1]) });
 		this.addCommand("panL", "f", { |msg| synth_out.set(\panL, msg[1]) });
 		this.addCommand("panR", "f", { |msg| synth_out.set(\panR, msg[1]) });
 		this.addCommand("monitorLevel", "f", { |msg| synth_out.set(\monitorLevel, msg[1]) });
         this.addCommand("bleedPost", "f", { |msg| synth_out.set(\bleedPost, msg[1]) });
-        this.addCommand("dj_filter_type", "f", { |msg| synth_out.set(\djFilterType, msg[1]) }); 
-        this.addCommand("dj_filter_gain", "f", { |msg| synth_out.set(\dfm1Gain, msg[1]) }); 
+        this.addCommand("dj_filter_type", "f", { |msg| synth_out.set(\djFilterType, msg[1]) }); // [v2.04]
+        this.addCommand("dj_filter_gain", "f", { |msg| synth_out.set(\dfm1Gain, msg[1]) }); // [v2.04]
 
+        // PARAMS -> BOTH (Amp controls visual in Core and audio in Out)
         this.addCommand("ampL", "f", { |msg| 
             synth_core.set(\ampL, msg[1]); 
             synth_out.set(\ampL, msg[1]); 
@@ -636,6 +549,7 @@ Engine_Ncoco : CroneEngine {
             synth_out.set(\ampR, msg[1]); 
         });
 
+        // MODULATION MATRICES (All Core)
 		this.addCommand("mod_speedL", "ffffffffffff", { |msg| synth_core.setn(\mod_speedL_Amts, msg.drop(1)) });
 		this.addCommand("mod_speedR", "ffffffffffff", { |msg| synth_core.setn(\mod_speedR_Amts, msg.drop(1)) });
 		this.addCommand("mod_flipL", "ffffffffffff", { |msg| synth_core.setn(\mod_flipL_Amts, msg.drop(1)) });
@@ -668,6 +582,6 @@ Engine_Ncoco : CroneEngine {
         synth_out.free; 
         bufL.free; bufR.free; 
         b_tape.free; b_mon.free; b_mod_vol.free; b_mod_filt.free; 
-        b_bleed.free; 
+        b_bleed.free; // [NEW]
     }
 }

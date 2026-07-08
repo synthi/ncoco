@@ -1,6 +1,4 @@
--- lib/ui.lua v2.50
--- CHANGELOG v2.50:
--- 1. EXPAND: BIT_NAMES from 3 to 5 entries (8bit, 12bit, 16bit, μ-law, ADPCM)
+-- lib/ui.lua v2.01
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:
@@ -21,8 +19,7 @@ local DST_NAMES = {
   [21]="VOL 1", [22]="VOL 2",
   [23]="AUD IN 1", [24]="AUD IN 2"
 }
--- [v2.50] 5 bit-depth modes: 0=8bit, 1=12bit, 2=16bit, 3=μ-law, 4=ADPCM
-local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="16bit", [4]="μ-law", [5]="ADPCM"}
+local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="16bit"}
 
 function UI.update_histories(G)
   for i=1, 2 do
