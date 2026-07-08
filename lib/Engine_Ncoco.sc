@@ -67,8 +67,7 @@ Engine_Ncoco : CroneEngine {
             coco1OutMode=0, coco2OutMode=0, 
             cocoSlewL=0.1, cocoSlewR=0.1,
             
-            slew_speed=0.1, slew_amp=0.05, slew_misc=0;
-            
+            slew_speed=0.1, slew_amp=0.05, slew_misc=0,
             // Bit depth modes: 0=8bit, 1=12bit, 2=16bit, 3=ulaw, 4=adpcm
             modeL=0, modeR=0;
 
