@@ -1,4 +1,7 @@
--- ncoco.lua v2.03
+-- ncoco.lua v2.04
+-- CHANGELOG v2.04:
+-- 1. NEW: 16n fader orientation param (Normal/Inverted) via _16n.set_inverted().
+-- 2. FIX: Uses _16n.normalize() with power curve for bipolar params (log-taper linearization).
 -- CHANGELOG v2.03:
 -- 1. FIX: Added math.randomseed() for random petal seeds at script start.
 -- 2. FIX: Replaced recursive copy_table with shallow copy for safety.
@@ -161,11 +164,10 @@ function G.snap_clear(id)
 end
 
 -- --- HELPERS FOR 16n ---
-local function normalize_input(midi_val)
-   if midi_val < 1 then return 0.0 end
-   if midi_val > 126 then return 1.0 end
-   if midi_val <= 80 then return util.linlin(1, 80, 0.0, 0.5, midi_val)
-   else return util.linlin(80, 126, 0.5, 1.0, midi_val) end
+local function is_bipolar_param(p_name)
+   return p_name == "filtL" or p_name == "filtR" or
+          p_name == "speed_offsetL" or p_name == "speed_offsetR" or
+          p_name == "pan_l" or p_name == "pan_r"
 end
 local function apply_glue(val_norm, param_id)
    if param_id == "speed_offsetL" or param_id == "speed_offsetR" or 
@@ -275,7 +277,7 @@ function init()
   math.randomseed(os.time())
   
   GridNav.init_map(G)
-  Params.init(SC, G)
+  Params.init(SC, G, _16n)
   
   params.action_write = function(filename, name, number) Storage.save(G, number) end
   params.action_read = function(filename, silent, number) Storage.load(G, SC, number) end
@@ -364,7 +366,7 @@ function init()
                 local p_obj = params:lookup_param(p_name)
                 if not p_obj then return end
 
-                local val_calibrated = normalize_input(msg.val)
+                local val_calibrated = _16n.normalize(msg.val, is_bipolar_param(p_name))
                 local val_glued = apply_glue(val_calibrated, p_name)
                 
                 local current_norm = params:get_raw(p_name)
@@ -422,7 +424,7 @@ function init()
     clock_ids[5] = cid_16n
     
     G.loaded = true 
-    print("Ncoco v2.03 Ready.")
+    print("Ncoco v2.04 Ready.")
   end)
 end
 

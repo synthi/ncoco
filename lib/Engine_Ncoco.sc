@@ -1,4 +1,9 @@
-// Engine_Ncoco.sc v2.06
+// Engine_Ncoco.sc v2.07
+// CHANGELOG v2.07:
+// 1. NEW: μ-law 8-bit companding replaces 12-bit linear quantization (bitDepthL/R==12).
+//    Encode → quantize 256 levels → decode, with inherent noise shaping via log curve.
+// 2. TWEAK: Dither for μ-law mode increased from 0.0016 to 0.004.
+
 // CHANGELOG v2.06:
 // 1. FIX: DFM1 LPF now 2-stage cascade with pre-attenuation (0.7) to tame nonlinearity.
 // 2. FIX: HPF is ALWAYS Classic (HPF.ar) in both modes - 15kHz max, closes properly.
@@ -140,6 +145,8 @@ Engine_Ncoco : CroneEngine {
             var src11_ar, src12_ar; 
             var fb_src11, fb_src12; 
 			var bleedAmpL, bleedAmpR;
+			var muLawEncL, muLawQuantL, muLawL;
+			var muLawEncR, muLawQuantR, muLawR;
 
 			// --- CORE DSP ---
 			
@@ -168,8 +175,8 @@ Engine_Ncoco : CroneEngine {
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			
-			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.0016) + ((1 - is8L - is12L) * 0.00016));
-			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.0016) + ((1 - is8R - is12R) * 0.00016));
+		noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.00016));
+		noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.00016));
 			
 			baseSR_L = (is8L * 16000) + (is12L * 31250) + ((1 - is8L - is12L) * 39000);
 			baseSR_R = ((is8R * 16000) + (is12R * 31250) + ((1 - is8R - is12R) * 39000)) * 1.002;
@@ -316,8 +323,15 @@ Engine_Ncoco : CroneEngine {
 			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
 			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
-			writeL = writeL.round(0.5 ** bitDepthL);
-			writeR = writeR.round(0.5 ** bitDepthR);
+			// μ-law 8-bit companding when is12L (bitDepthL==12), linear quantization otherwise
+			muLawEncL = writeL.sign * (1 + (255 * writeL.abs)).log / 256.log;
+			muLawQuantL = muLawEncL.round(2/255);
+			muLawL = muLawQuantL.sign * ((muLawQuantL.abs * 256.log).exp - 1) / 255;
+			muLawEncR = writeR.sign * (1 + (255 * writeR.abs)).log / 256.log;
+			muLawQuantR = muLawEncR.round(2/255);
+			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
+			writeL = Select.ar(is12L, [writeL.round(0.5 ** bitDepthL), muLawL]);
+			writeR = Select.ar(is12R, [writeR.round(0.5 ** bitDepthR), muLawR]);
 			
 			jitterAmountL = (is8L * 0.02) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.001);
 			jitterAmountR = (is8R * 0.02) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.001);
