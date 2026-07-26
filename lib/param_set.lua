@@ -1,4 +1,8 @@
--- lib/param_set.lua v2.07
+-- lib/param_set.lua v2.08
+-- CHANGELOG v2.08:
+-- 1. NEW: "16n Orientation" param (Normal/Inverted) in GLOBALS.
+-- 2. RENAME: "12bit" label changed to "μ-law" (SC interprets bitDepthL==12 as μ-law).
+
 -- CHANGELOG v2.07:
 -- 1. RENAME: "DFM1" label renamed to "Analog" in DJ Filter.
 -- 2. TWEAK: Default gain 0.32 (was 0.15).
@@ -13,10 +17,10 @@
 
 local Params = {}
 
-function Params.init(SC, G)
+function Params.init(SC, G, _16n)
   params:add_separator("Ncoco")
   
-  params:add_group("GLOBALS", 7) -- Increased count
+  params:add_group("GLOBALS", 8) -- Increased count for 16n Orientation
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
@@ -49,6 +53,10 @@ function Params.init(SC, G)
   params:add_control("dfm1_gain", "Analog Filter Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.32))
   params:set_action("dfm1_gain", function(x) engine.dj_filter_gain(x) end)
   params:hide("dfm1_gain")
+
+  -- 16n Fader Orientation (Normal/Inverted)
+  params:add_option("16n_orient", "16n Orientation", {"Normal", "Inverted"}, 1)
+  params:set_action("16n_orient", function(x) _16n.set_inverted(x == 2) end)
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
@@ -118,7 +126,7 @@ function Params.init(SC, G)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-    params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "16bit"}, 1)
+    params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "16bit"}, 1)
     params:set_action("bits"..s, function(x) 
        local b = (x==1) and 8 or ((x==2) and 12 or 16)
        SC.set_bitdepth(i,b) 
