@@ -1,4 +1,8 @@
--- lib/grid_nav.lua v2.03
+-- lib/grid_nav.lua v2.04
+-- CHANGELOG v2.04:
+-- 1. FIX: Sequencer simulated events now set cache=-1 (dirty) instead of 15,
+--    allowing GridNav.redraw to illuminate buttons. Previously cache=15 blocked
+--    the differential update (cache==b==15 → skip), leaving LEDs dark.
 -- CHANGELOG v2.03:
 -- 1. FIX: Added 10000 event limit per sequencer to prevent memory leaks.
 -- CHANGELOG v2.02:
@@ -102,11 +106,15 @@ function GridNav.key(G, g, x, y, z, simulated)
   end
 
   if z == 1 then 
-    GridNav.cache[x][y] = 15
-    if g and not simulated then g:led(x, y, 15); g:refresh() end 
+    if not simulated then
+      GridNav.cache[x][y] = 15
+      if g then g:led(x, y, 15); g:refresh() end
+    else
+      GridNav.cache[x][y] = -1
+    end
   end
   
-  if not simulated and z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec' or obj.t == 'seq' or obj.t == 'fader' or obj.t == 'snap') then 
+  if z == 0 and (obj.t == 'skip' or obj.t == 'flip' or obj.t == 'rec' or obj.t == 'seq' or obj.t == 'fader' or obj.t == 'snap') then 
     GridNav.cache[x][y] = -1
   end
 
