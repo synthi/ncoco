@@ -329,20 +329,20 @@ Engine_Ncoco : CroneEngine {
 			
 			// [v2.09] ADPCM 6-bit G.726 encode/decode
 			// Step size approximated by 16 * 1.1^step (avoids array indexing with signals)
-			// Adaptation table via Select.ar (SC allows Select.ar with literal arrays)
+			// Adaptation table via Select.kr (control rate is fine for step updates)
 			adpcmStepSizeL = 16 * (1.1 ** adpcmStepL.round.clip(0, 48));
 			adpcmCodeL = ((writeL - adpcmPredL) / (adpcmStepSizeL / 64)).round.clip(-32, 31) + 32;
 			adpcmCodeL = adpcmCodeL.round.clip(0, 63);
 			adpcmDiffL = ((adpcmCodeL * 2 + 1) * adpcmStepSizeL) / 64;
-			adpcmPredL_new = (adpcmPredL + Select.ar(adpcmCodeL >= 32, [adpcmDiffL, adpcmDiffL.neg])).clip(-1, 1);
-			adpcmStepL_new = (adpcmStepL + Select.ar(adpcmCodeL, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
+			adpcmPredL_new = (adpcmPredL + Select.kr(adpcmCodeL >= 32, [adpcmDiffL, adpcmDiffL.neg])).clip(-1, 1);
+			adpcmStepL_new = (adpcmStepL + Select.kr(adpcmCodeL, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
 			
 			adpcmStepSizeR = 16 * (1.1 ** adpcmStepR.round.clip(0, 48));
 			adpcmCodeR = ((writeR - adpcmPredR) / (adpcmStepSizeR / 64)).round.clip(-32, 31) + 32;
 			adpcmCodeR = adpcmCodeR.round.clip(0, 63);
 			adpcmDiffR = ((adpcmCodeR * 2 + 1) * adpcmStepSizeR) / 64;
-			adpcmPredR_new = (adpcmPredR + Select.ar(adpcmCodeR >= 32, [adpcmDiffR, adpcmDiffR.neg])).clip(-1, 1);
-			adpcmStepR_new = (adpcmStepR + Select.ar(adpcmCodeR, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
+			adpcmPredR_new = (adpcmPredR + Select.kr(adpcmCodeR >= 32, [adpcmDiffR, adpcmDiffR.neg])).clip(-1, 1);
+			adpcmStepR_new = (adpcmStepR + Select.kr(adpcmCodeR, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
 			
 			// Select quantization: 8-bit linear, μ-law, or ADPCM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
