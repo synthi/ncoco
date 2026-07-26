@@ -441,7 +441,7 @@ function init()
     clock_ids[5] = cid_16n
     
     G.loaded = true 
-    print("Ncoco v2.04 Ready.")
+    print("Ncoco v2.05 Ready.")
   end)
 end
 

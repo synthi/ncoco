@@ -152,6 +152,7 @@ Engine_Ncoco : CroneEngine {
 			var adpcmStepL, adpcmPredL, adpcmStepR, adpcmPredR;
 			var adpcmCodeL, adpcmCodeR, adpcmDiffL, adpcmDiffR;
 			var adpcmPredL_new, adpcmPredR_new, adpcmStepL_new, adpcmStepR_new;
+			var adpcmStepSizeL, adpcmStepSizeR;
 			var isAdpcmL, isAdpcmR;
 
 			// --- CORE DSP ---
@@ -327,18 +328,21 @@ Engine_Ncoco : CroneEngine {
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
 			// [v2.09] ADPCM 6-bit G.726 encode/decode
-			// G.726 step size table (49 entries, ROM)
-			adpcmCodeL = ((writeL - adpcmPredL) / ([16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepL] / 64)).round.clip(-32, 31) + 32;
+			// Step size approximated by 16 * 1.1^step (avoids array indexing with signals)
+			// Adaptation table via Select.ar (SC allows Select.ar with literal arrays)
+			adpcmStepSizeL = 16 * (1.1 ** adpcmStepL.round.clip(0, 48));
+			adpcmCodeL = ((writeL - adpcmPredL) / (adpcmStepSizeL / 64)).round.clip(-32, 31) + 32;
 			adpcmCodeL = adpcmCodeL.round.clip(0, 63);
-			adpcmDiffL = ((adpcmCodeL * 2 + 1) * [16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepL]) / 64;
+			adpcmDiffL = ((adpcmCodeL * 2 + 1) * adpcmStepSizeL) / 64;
 			adpcmPredL_new = (adpcmPredL + Select.ar(adpcmCodeL >= 32, [adpcmDiffL, adpcmDiffL.neg])).clip(-1, 1);
-			adpcmStepL_new = (adpcmStepL + [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16][adpcmCodeL]).clip(0, 48);
+			adpcmStepL_new = (adpcmStepL + Select.ar(adpcmCodeL, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
 			
-			adpcmCodeR = ((writeR - adpcmPredR) / ([16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepR] / 64)).round.clip(-32, 31) + 32;
+			adpcmStepSizeR = 16 * (1.1 ** adpcmStepR.round.clip(0, 48));
+			adpcmCodeR = ((writeR - adpcmPredR) / (adpcmStepSizeR / 64)).round.clip(-32, 31) + 32;
 			adpcmCodeR = adpcmCodeR.round.clip(0, 63);
-			adpcmDiffR = ((adpcmCodeR * 2 + 1) * [16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepR]) / 64;
+			adpcmDiffR = ((adpcmCodeR * 2 + 1) * adpcmStepSizeR) / 64;
 			adpcmPredR_new = (adpcmPredR + Select.ar(adpcmCodeR >= 32, [adpcmDiffR, adpcmDiffR.neg])).clip(-1, 1);
-			adpcmStepR_new = (adpcmStepR + [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16][adpcmCodeR]).clip(0, 48);
+			adpcmStepR_new = (adpcmStepR + Select.ar(adpcmCodeR, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
 			
 			// Select quantization: 8-bit linear, μ-law, or ADPCM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
