@@ -1,7 +1,4 @@
--- lib/globals.lua v2.02
--- CHANGELOG v2.02:
--- 1. CLEANUP: Removed M.fader_inverted (moved to 16n.lua as _16n.inverted).
-
+-- lib/globals.lua v2.01
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9000:
@@ -50,7 +47,6 @@ M.active_snapshot = 0
 
 M.fader_latched = {}
 for i=1, 16 do M.fader_latched[i] = false end
-
 
 M.popup = {
   active = false,

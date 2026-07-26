@@ -1,7 +1,4 @@
--- lib/16n.lua v2.02
--- CHANGELOG v2.02:
--- 1. NEW: _16n.inverted flag + _16n.set_inverted() for Normal/Inverted fader orientation.
--- 2. NEW: _16n.normalize(midi_val, bipolar) with log-taper linearization for bipolar params.
+-- lib/16n.lua v2.01
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v3007:
@@ -11,24 +8,6 @@
 
 local _16n = {}
 _16n.last_values = {}
-_16n.inverted = false
-
-_16n.set_inverted = function(state)
-   _16n.inverted = state
-   _16n.last_values = {}
-end
-
-_16n.normalize = function(midi_val, bipolar)
-   if _16n.inverted then midi_val = 127 - midi_val end
-   if midi_val < 1 then return 0.0 end
-   if midi_val > 126 then return 1.0 end
-   if bipolar then
-      return (midi_val / 127) ^ 0.623
-   else
-      if midi_val <= 80 then return util.linlin(1, 80, 0.0, 0.5, midi_val)
-      else return util.linlin(80, 126, 0.5, 1.0, midi_val) end
-   end
-end
 
 _16n.request_sysex_config_dump = function(midi_dev) 
   if midi_dev then 
