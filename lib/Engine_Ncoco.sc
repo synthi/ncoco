@@ -1,4 +1,9 @@
-// Engine_Ncoco.sc v2.08
+// Engine_Ncoco.sc v2.09
+// CHANGELOG v2.09:
+// 1. NEW: ADPCM 6-bit G.726 mode replaces 16-bit (bitDepthL/R==14).
+//    - 22kHz sample rate, filter 10000, jitter 0.01, bleed 0.003, noise 0.002
+//    - Real G.726 adaptive prediction with step table (ROM) via LocalIn/Out state.
+//    - 0 new vars: LocalIn 10→14, LocalOut +4 channels (stepL, predL, stepR, predR).
 // CHANGELOG v2.08:
 // 1. FIX: Inlined ~24 vars to stay under SynthDef var limit (fixes rec/feedback bug on ch1).
 // 2. KEPT: μ-law companding from v2.07.
@@ -143,12 +148,21 @@ Engine_Ncoco : CroneEngine {
             var src11_ar, src12_ar;
 			var muLawEncL, muLawQuantL, muLawL;
 			var muLawEncR, muLawQuantR, muLawR;
+			// ADPCM state (via LocalIn/Out, no new vars needed)
+			var adpcmStepL, adpcmPredL, adpcmStepR, adpcmPredR;
+			var adpcmCodeL, adpcmCodeR, adpcmDiffL, adpcmDiffR;
+			var adpcmPredL_new, adpcmPredR_new, adpcmStepL_new, adpcmStepR_new;
+			var isAdpcmL, isAdpcmR;
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(10);
+            feedback_in = LocalIn.ar(14);  // [v2.09] 10→14 for ADPCM state
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
+			adpcmStepL = feedback_in[10];  // [v2.09] ADPCM state from LocalIn
+			adpcmPredL = feedback_in[11];
+			adpcmStepR = feedback_in[12];
+			adpcmPredR = feedback_in[13];
 
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
@@ -164,13 +178,15 @@ Engine_Ncoco : CroneEngine {
 
 			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
+			isAdpcmL = bitDepthL >= 14; isAdpcmR = bitDepthR >= 14;
 			
-			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.00016));
-			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.00016));
+			// [v2.09] ADPCM: noise 0.002, bleed 0.003, SR 22000, filt 10000, jitter 0.01
+			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.004) + (isAdpcmL * 0.002));
+			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.004) + (isAdpcmR * 0.002));
 			
-			baseSR_L = (is8L * 16000) + (is12L * 31250) + ((1 - is8L - is12L) * 39000);
-			baseSR_R = ((is8R * 16000) + (is12R * 31250) + ((1 - is8R - is12R) * 39000)) * 1.002;
-            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + ((1 - is8L - is12L) * 18000);
+			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 22000);
+			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 22000)) * 1.002;
+            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 10000);
 			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
             inputR_sig = inputR_sig + (noiseR * 0.5);
@@ -253,12 +269,13 @@ Engine_Ncoco : CroneEngine {
 			
 			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
-            // Bleed Logic (inlined bleedAmp)
-			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * ((is8L * 0.0025) + (is12L * 0.001));
-			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * ((is8R * 0.0025) + (is12R * 0.001));
+            // Bleed Logic (inlined bleedAmp) — [v2.09] ADPCM: 0.003
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * ((is8L * 0.0025) + (is12L * 0.001) + (isAdpcmL * 0.003));
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * ((is8R * 0.0025) + (is12R * 0.001) + (isAdpcmR * 0.003));
 
-			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: (1 + (1 - is8L - is12L)));
-			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: (1 + (1 - is8R - is12R)));
+			// [v2.09] ADPCM: interpolation=1 (same as 8-bit)
+			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: (1 + (1 - is8L - is12L - isAdpcmL)));
+			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: (1 + (1 - is8R - is12R - isAdpcmR)));
 			
             readL = readL + (noiseL * 0.5);
             readR = readR + (noiseR * 0.5);
@@ -301,23 +318,50 @@ Engine_Ncoco : CroneEngine {
 			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
 			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
-			// μ-law 8-bit companding when is12L (bitDepthL==12), linear quantization otherwise
+			// μ-law 8-bit companding when is12L (bitDepthL==12)
 			muLawEncL = writeL.sign * (1 + (255 * writeL.abs)).log / 256.log;
 			muLawQuantL = muLawEncL.round(2/255);
 			muLawL = muLawQuantL.sign * ((muLawQuantL.abs * 256.log).exp - 1) / 255;
 			muLawEncR = writeR.sign * (1 + (255 * writeR.abs)).log / 256.log;
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
-			writeL = Select.ar(is12L, [writeL.round(0.5 ** bitDepthL), muLawL]);
-			writeR = Select.ar(is12R, [writeR.round(0.5 ** bitDepthR), muLawR]);
 			
-			// SR reduction with jitter (inlined jitterAmount)
-			writeL = Select.ar(is8L + is12L, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + ((1 - is8L - is12L) * 0.001)))))]);
-			writeR = Select.ar(is8R + is12R, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + ((1 - is8R - is12R) * 0.001)))))]);
+			// [v2.09] ADPCM 6-bit G.726 encode/decode
+			// G.726 step size table (49 entries, ROM)
+			adpcmCodeL = ((writeL - adpcmPredL) / ([16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepL] / 64)).round.clip(-32, 31) + 32;
+			adpcmCodeL = adpcmCodeL.round.clip(0, 63);
+			adpcmDiffL = ((adpcmCodeL * 2 + 1) * [16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepL]) / 64;
+			adpcmPredL_new = (adpcmPredL + Select.ar(adpcmCodeL >= 32, [adpcmDiffL, adpcmDiffL.neg])).clip(-1, 1);
+			adpcmStepL_new = (adpcmStepL + [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16][adpcmCodeL]).clip(0, 48);
+			
+			adpcmCodeR = ((writeR - adpcmPredR) / ([16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepR] / 64)).round.clip(-32, 31) + 32;
+			adpcmCodeR = adpcmCodeR.round.clip(0, 63);
+			adpcmDiffR = ((adpcmCodeR * 2 + 1) * [16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552][adpcmStepR]) / 64;
+			adpcmPredR_new = (adpcmPredR + Select.ar(adpcmCodeR >= 32, [adpcmDiffR, adpcmDiffR.neg])).clip(-1, 1);
+			adpcmStepR_new = (adpcmStepR + [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16][adpcmCodeR]).clip(0, 48);
+			
+			// Select quantization: 8-bit linear, μ-law, or ADPCM
+			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
+				writeL.round(0.5 ** bitDepthL),  // 8-bit (is8L)
+				muLawL,                          // μ-law (is12L)
+				writeL.round(0.5 ** bitDepthL),  // 16-bit (unused, kept for safety)
+				adpcmPredL_new                   // ADPCM (isAdpcmL) — decoded sample
+			]);
+			writeR = Select.ar(is8R + (is12R * 2) + (isAdpcmR * 3), [
+				writeR.round(0.5 ** bitDepthR),  // 8-bit
+				muLawR,                          // μ-law
+				writeR.round(0.5 ** bitDepthR),  // 16-bit (unused)
+				adpcmPredR_new                   // ADPCM
+			]);
+			
+			// SR reduction with jitter — [v2.09] ADPCM: jitter 0.01
+			writeL = Select.ar(is8L + is12L + isAdpcmL, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01)))))]);
+			writeR = Select.ar(is8R + is12R + isAdpcmR, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01)))))]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
+			// [v2.09] LocalOut: 10→14 channels (+adpcmStepL, adpcmPredL, adpcmStepR, adpcmPredR)
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar, adpcmStepL_new, adpcmPredL_new, adpcmStepR_new, adpcmPredR_new]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 

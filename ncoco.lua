@@ -1,4 +1,8 @@
--- ncoco.lua v2.04
+-- ncoco.lua v2.05
+-- CHANGELOG v2.05:
+-- 1. FIX: Grid freeze recovery — logging, nuclear option (g:all(0)), g = grid.connect() on reconnect.
+-- 2. FIX: 16n orientation now uses taper pivot 80/47 instead of inverting values.
+-- 3. NEW: ADPCM 6-bit G.726 mode replaces 16-bit (bitDepth=14).
 -- CHANGELOG v2.04:
 -- 1. NEW: 16n fader orientation param (Normal/Inverted) via _16n.set_inverted().
 -- 2. FIX: Uses _16n.normalize() with power curve for bipolar params (log-taper linearization).
