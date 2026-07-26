@@ -337,15 +337,28 @@ function init()
     end
 
     grid_metro = metro.init(); grid_metro.time = 1/15
+    local grid_error_count = 0
     grid_metro.event = function()
        local ok, err = pcall(GridNav.redraw, G, g)
-       if not ok then print("GRID_REDRAW_ERROR: " .. tostring(err)) end
+       if not ok then
+          grid_error_count = grid_error_count + 1
+          print("GRID_REDRAW_ERROR [" .. grid_error_count .. "]: " .. tostring(err))
+          GridNav.reset_cache()
+          if grid_error_count >= 10 then
+             print("GRID FREEZE DETECTED - Forcing full LED reset")
+             g:all(0); g:refresh()
+             grid_error_count = 0
+          end
+       else
+          grid_error_count = 0
+       end
     end
     grid_metro:start()
     
     -- [FIX] Grid Auto-Heal callback
     grid.add = function()
        print("Grid Reconnected - Resetting Cache")
+       g = grid.connect()
        GridNav.reset_cache()
     end
 

@@ -1,4 +1,9 @@
--- lib/16n.lua v2.02
+-- lib/16n.lua v2.03
+-- CHANGELOG v2.03:
+-- 1. FIX: Removed midi inversion from normalize() — hardware already provides inverted signal.
+-- 2. FIX: Changed taper logic — pivot changes based on orientation:
+--    Inverted: pivot at MIDI 80 (physical center), Normal: pivot at MIDI 47 (mirror of 80).
+-- 3. FIX: Bipolar params use same linear 2-segment taper (power curve removed).
 -- CHANGELOG v2.02:
 -- 1. NEW: _16n.inverted flag + _16n.set_inverted() for Normal/Inverted fader orientation.
 -- 2. NEW: _16n.normalize(midi_val, bipolar) with log-taper linearization for bipolar params.
@@ -6,8 +11,8 @@
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v3007:
 -- 1. ROLLBACK: Removed "Smart Wake-Up" filter completely.
---    Reason: The filter was blocking smooth 1-step movements, turning them into steps/zipper noise.
---    Resolution (128 steps) is restored. Audio should be smooth.
+-- 2. Reason: The filter was blocking smooth 1-step movements, turning them into steps/zipper noise.
+-- 3. Resolution (128 steps) is restored. Audio should be smooth.
 
 local _16n = {}
 _16n.last_values = {}
@@ -19,14 +24,13 @@ _16n.set_inverted = function(state)
 end
 
 _16n.normalize = function(midi_val, bipolar)
-   if _16n.inverted then midi_val = 127 - midi_val end
    if midi_val < 1 then return 0.0 end
    if midi_val > 126 then return 1.0 end
-   if bipolar then
-      return (midi_val / 127) ^ 0.623
+   local pivot = _16n.inverted and 80 or 47
+   if midi_val <= pivot then
+      return util.linlin(1, pivot, 0.0, 0.5, midi_val)
    else
-      if midi_val <= 80 then return util.linlin(1, 80, 0.0, 0.5, midi_val)
-      else return util.linlin(80, 126, 0.5, 1.0, midi_val) end
+      return util.linlin(pivot, 126, 0.5, 1.0, midi_val)
    end
 end
 

@@ -1,4 +1,7 @@
--- lib/grid_nav.lua v2.04
+-- lib/grid_nav.lua v2.05
+-- CHANGELOG v2.05:
+-- 1. OPT: g:refresh() only called when at least one LED changed (reduces serial traffic).
+-- 2. OPT: Cache reset every 75 frames (~5s at 15Hz) to prevent desync.
 -- CHANGELOG v2.04:
 -- 1. FIX: Sequencer simulated events now set cache=-1 (dirty) instead of 15,
 --    allowing GridNav.redraw to illuminate buttons. Previously cache=15 blocked
@@ -285,20 +288,18 @@ local function get_fader_bright(G, current_speed, btn_idx)
   return bg
 end
 
--- SMART-REFRESH IMPLEMENTATION (30Hz)
+-- SMART-REFRESH IMPLEMENTATION (~15Hz)
 function GridNav.redraw(G, g)
-  -- UNLOCKED: "is_dirty" check removed to allow 30Hz fluid animation.
-  -- The cache check (Differential Update) at the end protects the serial bus.
-  
   if not g then return end
   
-  -- [FIX] Auto-Heal: disabled (was ineffective, root cause fixed in v2.00)
-  -- GridNav.refresh_counter = GridNav.refresh_counter + 1
-  -- if GridNav.refresh_counter > 30 then
-  --    GridNav.reset_cache()
-  --    GridNav.refresh_counter = 0
-  -- end
+  -- Periodic cache reset (~5s / 75 frames) to prevent LED desync
+  GridNav.refresh_counter = (GridNav.refresh_counter or 0) + 1
+  if GridNav.refresh_counter >= 75 then
+     GridNav.reset_cache()
+     GridNav.refresh_counter = 0
+  end
 
+  local changed = false
   for x=1,16 do for y=1,8 do
     local obj=G.grid_map[x][y]; local b=0
     
@@ -335,13 +336,11 @@ function GridNav.redraw(G, g)
         end
       elseif obj.t=='jack' or obj.t=='p_jack' then
         if G.focus.source then
-           -- STATIC MODE: Patching (Simply show connection status)
            if G.patch[G.focus.source] and G.patch[G.focus.source][obj.id] then
               b=(G.patch[G.focus.source][obj.id]~=0) and 12 or 3
            else b=3 end
         elseif G.focus.inspect_dest==obj.id then b=15
         else 
-          -- DYNAMIC MODE: Monitoring (Show Energy Flow)
           local energy = 0
           for src=1, 12 do
              if G.patch[src] and G.patch[src][obj.id] then
@@ -390,12 +389,14 @@ function GridNav.redraw(G, g)
       b = 0
     end
     
-    -- DIFFERENTIAL UPDATE (Cache Filter)
+    -- DIFFERENTIAL UPDATE: only send LEDs that changed
     if GridNav.cache[x][y] ~= b then 
        g:led(x,y,b)
        GridNav.cache[x][y] = b 
+       changed = true
     end
   end end
-  g:refresh()
+  -- Only refresh grid if at least one LED was updated
+  if changed then g:refresh() end
 end
 return GridNav
