@@ -152,7 +152,8 @@ Engine_Ncoco : CroneEngine {
 			var adpcmStepL, adpcmPredL, adpcmStepR, adpcmPredR;
 			var adpcmCodeL, adpcmCodeR, adpcmDiffL, adpcmDiffR;
 			var adpcmPredL_new, adpcmPredR_new, adpcmStepL_new, adpcmStepR_new;
-			var adpcmStepSizeL, adpcmStepSizeR;
+			var adpcmStepSizeL, adpcmStepSizeR, adpcmTrigL, adpcmTrigR;
+			var writeL_adpcm, writeR_adpcm;
 			var isAdpcmL, isAdpcmR;
 
 			// --- CORE DSP ---
@@ -328,39 +329,48 @@ Engine_Ncoco : CroneEngine {
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
 			// [v2.09] ADPCM 6-bit G.726 encode/decode
+			// CRITICAL: SR reduction (Latch) must happen BEFORE encode, not after.
+			// ADPCM prediction state only updates at the reduced sample rate.
+			// For non-ADPCM modes, the existing path (Latch after quantization) is used.
 			// Step size approximated by 16 * 1.1^step (avoids array indexing with signals)
 			// Adaptation table via Select.kr (control rate is fine for step updates)
+			
+			// SR reduction trigger (shared for all modes)
+			adpcmTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
+			adpcmTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
+			
+			// ADPCM path: Latch write BEFORE encode/decode
+			writeL_adpcm = Latch.ar(writeL, adpcmTrigL);
 			adpcmStepSizeL = 16 * (1.1 ** adpcmStepL.round.clip(0, 48));
-			adpcmCodeL = ((writeL - adpcmPredL) / (adpcmStepSizeL / 64)).round.clip(-32, 31) + 32;
+			adpcmCodeL = ((writeL_adpcm - adpcmPredL) / (adpcmStepSizeL / 64)).round.clip(-32, 31) + 32;
 			adpcmCodeL = adpcmCodeL.round.clip(0, 63);
 			adpcmDiffL = ((adpcmCodeL * 2 + 1) * adpcmStepSizeL) / 64;
 			adpcmPredL_new = (adpcmPredL + Select.kr(adpcmCodeL >= 32, [adpcmDiffL, adpcmDiffL.neg])).clip(-1, 1);
 			adpcmStepL_new = (adpcmStepL + Select.kr(adpcmCodeL, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
 			
+			writeR_adpcm = Latch.ar(writeR, adpcmTrigR);
 			adpcmStepSizeR = 16 * (1.1 ** adpcmStepR.round.clip(0, 48));
-			adpcmCodeR = ((writeR - adpcmPredR) / (adpcmStepSizeR / 64)).round.clip(-32, 31) + 32;
+			adpcmCodeR = ((writeR_adpcm - adpcmPredR) / (adpcmStepSizeR / 64)).round.clip(-32, 31) + 32;
 			adpcmCodeR = adpcmCodeR.round.clip(0, 63);
 			adpcmDiffR = ((adpcmCodeR * 2 + 1) * adpcmStepSizeR) / 64;
 			adpcmPredR_new = (adpcmPredR + Select.kr(adpcmCodeR >= 32, [adpcmDiffR, adpcmDiffR.neg])).clip(-1, 1);
 			adpcmStepR_new = (adpcmStepR + Select.kr(adpcmCodeR, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
 			
 			// Select quantization: 8-bit linear, μ-law, or ADPCM
+			// For 8-bit/μ-law: quantize then SR reduce (Latch after)
+			// For ADPCM: SR reduce then encode (Latch before) — already done above
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
-				writeL.round(0.5 ** bitDepthL),  // 8-bit (is8L)
-				muLawL,                          // μ-law (is12L)
-				writeL.round(0.5 ** bitDepthL),  // 16-bit (unused, kept for safety)
-				adpcmPredL_new                   // ADPCM (isAdpcmL) — decoded sample
+				Latch.ar(writeL.round(0.5 ** bitDepthL), adpcmTrigL),  // 8-bit (is8L)
+				Latch.ar(muLawL, adpcmTrigL),                          // μ-law (is12L)
+				Latch.ar(writeL.round(0.5 ** bitDepthL), adpcmTrigL),  // 16-bit (unused)
+				adpcmPredL_new                                          // ADPCM (isAdpcmL) — already latched
 			]);
 			writeR = Select.ar(is8R + (is12R * 2) + (isAdpcmR * 3), [
-				writeR.round(0.5 ** bitDepthR),  // 8-bit
-				muLawR,                          // μ-law
-				writeR.round(0.5 ** bitDepthR),  // 16-bit (unused)
-				adpcmPredR_new                   // ADPCM
+				Latch.ar(writeR.round(0.5 ** bitDepthR), adpcmTrigR),  // 8-bit
+				Latch.ar(muLawR, adpcmTrigR),                          // μ-law
+				Latch.ar(writeR.round(0.5 ** bitDepthR), adpcmTrigR),  // 16-bit (unused)
+				adpcmPredR_new                                          // ADPCM
 			]);
-			
-			// SR reduction with jitter — [v2.09] ADPCM: jitter 0.01
-			writeL = Select.ar(is8L + is12L + isAdpcmL, [writeL, Latch.ar(writeL, Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01)))))]);
-			writeR = Select.ar(is8R + is12R + isAdpcmR, [writeR, Latch.ar(writeR, Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01)))))]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
