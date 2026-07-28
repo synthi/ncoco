@@ -1,4 +1,12 @@
-// Engine_Ncoco.sc v2.09
+// Engine_Ncoco.sc v2.10
+// CHANGELOG v2.10:
+// 1. REWRITE: ADPCM replaced with real IMA ADPCM 4-bit standard codec.
+//    - IMA ADPCM 4-bit (16 codes), 89-entry step size table, 8-entry index adjust table.
+//    - Sample-by-sample feedback via Delay1.ar(x2) = 1 sample @24kHz.
+//    - Fixed 24kHz, no jitter, no tape-speed dependence for ADPCM.
+//    - Tables loaded in static Buffers (imaStepSizeBuf, imaIndexBuf), BufRd.ar lookup.
+//    - LocalIn/Out back to 10 channels (ADPCM state removed).
+//    - Net -10 vars vs old ADPCM (10 IMA vars replace 20 old vars).
 // CHANGELOG v2.09:
 // 1. NEW: ADPCM 6-bit G.726 mode replaces 16-bit (bitDepthL/R==14).
 //    - 22kHz sample rate, filter 10000, jitter 0.01, bleed 0.003, noise 0.002
@@ -29,6 +37,7 @@
 Engine_Ncoco : CroneEngine {
 	var <synth_core, <synth_out;
 	var <bufL, <bufR;
+	var <imaStepSizeBuf, <imaIndexBuf;  // [v2.10] IMA ADPCM table buffers
 	var <b_tape, <b_mon, <b_bleed, <b_mod_vol, <b_mod_filt;
 	var <osc_responder; 
 	var <norns_addr;
@@ -56,12 +65,29 @@ Engine_Ncoco : CroneEngine {
 		bufL.zero; bufR.zero;
 		context.server.sync;
 
+		// [v2.10] IMA ADPCM Step Size Table (89 values, normalized to 0-1)
+		imaStepSizeBuf = Buffer.loadCollection(context.server, [
+			7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31,
+			34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143,
+			157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544,
+			598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878,
+			2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894,
+			6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818,
+			18500, 20350, 22385, 24623, 27086, 29794, 32767
+		].collect({ |v| v / 32768 }));
+
+		// [v2.10] IMA ADPCM Index Adjustment Table (8 values for 4-bit magnitude 0-7)
+		imaIndexBuf = Buffer.loadCollection(context.server, [-1, -1, -1, -1, 2, 4, 6, 8]);
+
+		context.server.sync;
+
 		// -----------------------------------------------------------
 		// SYNTH 1: CORE
 		// -----------------------------------------------------------
 		SynthDef(\NcocoCore, {
 			arg bufL, bufR, inL, inR,
-			bus_tape_out, bus_mon_out, bus_bleed_out, // Added bleed out
+			imaStepSizeBuf, imaIndexBuf,  // [v2.10] IMA ADPCM table buffers
+			bus_tape_out, bus_mon_out, bus_bleed_out,
 			bus_mvol_out, bus_mfilt_out,
 			
 			recL=0, recR=0, fbL=0.85, fbR=0.85, speedL=1.0, speedR=1.0,     
@@ -148,23 +174,19 @@ Engine_Ncoco : CroneEngine {
             var src11_ar, src12_ar;
 			var muLawEncL, muLawQuantL, muLawL;
 			var muLawEncR, muLawQuantR, muLawR;
-			// ADPCM state (via LocalIn/Out, no new vars needed)
-			var adpcmStepL, adpcmPredL, adpcmStepR, adpcmPredR;
-			var adpcmCodeL, adpcmCodeR, adpcmDiffL, adpcmDiffR;
-			var adpcmPredL_new, adpcmPredR_new, adpcmStepL_new, adpcmStepR_new;
-			var adpcmStepSizeL, adpcmStepSizeR, adpcmTrigL, adpcmTrigR;
-			var writeL_adpcm, writeR_adpcm;
 			var isAdpcmL, isAdpcmR;
+
+			// [v2.10] IMA ADPCM 4-bit state (10 vars, replaces 20 old ADPCM vars)
+			var imaTrigL, imaTrigR;                         // 24kHz fixed triggers
+			var imaStepIdxL, imaPredL, imaStepIdxR, imaPredR; // delayed state (Delay1 x2)
+			var imaStepIdxL_new, imaPredL_new, imaStepIdxR_new, imaPredR_new; // new state
+			var imaCodeL, imaCodeR;                         // quantized code (4-bit: 0-15)
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(14);  // [v2.09] 10→14 for ADPCM state
+            feedback_in = LocalIn.ar(10);  // [v2.10] back to 10 (ADPCM state now in Delay1)
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7]; 
-			adpcmStepL = feedback_in[10];  // [v2.09] ADPCM state from LocalIn
-			adpcmPredL = feedback_in[11];
-			adpcmStepR = feedback_in[12];
-			adpcmPredR = feedback_in[13];
 
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
@@ -182,12 +204,12 @@ Engine_Ncoco : CroneEngine {
 			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
 			isAdpcmL = bitDepthL >= 14; isAdpcmR = bitDepthR >= 14;
 			
-			// [v2.09] ADPCM: noise 0.002, bleed 0.003, SR 22000, filt 10000, jitter 0.01
+			// [v2.10] ADPCM: noise 0.002, bleed 0.003, SR 24000, filt 10000
 			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.004) + (isAdpcmL * 0.002));
 			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.004) + (isAdpcmR * 0.002));
 			
-			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 22000);
-			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 22000)) * 1.002;
+			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 24000);
+			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 24000)) * 1.002;
             fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 10000);
 			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
@@ -271,11 +293,11 @@ Engine_Ncoco : CroneEngine {
 			
 			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
-            // Bleed Logic (inlined bleedAmp) — [v2.09] ADPCM: 0.003
+            // Bleed Logic (inlined bleedAmp) — [v2.10] ADPCM: 0.003
 			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * ((is8L * 0.0025) + (is12L * 0.001) + (isAdpcmL * 0.003));
 			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * ((is8R * 0.0025) + (is12R * 0.001) + (isAdpcmR * 0.003));
 
-			// [v2.09] ADPCM: interpolation=1 (same as 8-bit)
+			// [v2.10] ADPCM: interpolation=1 (same as 8-bit)
 			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: (1 + (1 - is8L - is12L - isAdpcmL)));
 			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: (1 + (1 - is8R - is12R - isAdpcmR)));
 			
@@ -328,54 +350,75 @@ Engine_Ncoco : CroneEngine {
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
-			// [v2.09] ADPCM 6-bit G.726 encode/decode
-			// CRITICAL: SR reduction (Latch) must happen BEFORE encode, not after.
-			// ADPCM prediction state only updates at the reduced sample rate.
-			// For non-ADPCM modes, the existing path (Latch after quantization) is used.
-			// Step size approximated by 16 * 1.1^step (avoids array indexing with signals)
-			// Adaptation table via Select.kr (control rate is fine for step updates)
+			// [v2.10] IMA ADPCM 4-bit encode/decode
+			// Sample-by-sample feedback: Delay1.ar(x2) = 1 sample @24kHz (48kHz/2)
+			// Table lookup via BufRd.ar from static buffers (imaStepSizeBuf, imaIndexBuf)
+			// 10 vars: imaTrigL/R, imaStepIdxL/R, imaPredL/R, imaStepIdxL/R_new, imaPredL/R_new, imaCodeL/R
 			
-			// SR reduction trigger (shared for all modes)
-			adpcmTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
-			adpcmTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
+			// Fixed 24kHz triggers (no jitter, no tape-speed dependence)
+			imaTrigL = Impulse.ar(24000);
+			imaTrigR = Impulse.ar(24000);
 			
-			// ADPCM path: Latch write BEFORE encode/decode
-			writeL_adpcm = Latch.ar(writeL, adpcmTrigL);
-			adpcmStepSizeL = 16 * (1.1 ** adpcmStepL.round.clip(0, 48));
-			adpcmCodeL = ((writeL_adpcm - adpcmPredL) / (adpcmStepSizeL / 64)).round.clip(-32, 31) + 32;
-			adpcmCodeL = adpcmCodeL.round.clip(0, 63);
-			adpcmDiffL = ((adpcmCodeL * 2 + 1) * adpcmStepSizeL) / 64;
-			adpcmPredL_new = (adpcmPredL + Select.kr(adpcmCodeL >= 32, [adpcmDiffL, adpcmDiffL.neg])).clip(-1, 1);
-			adpcmStepL_new = (adpcmStepL + Select.kr(adpcmCodeL, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
+			// Delayed state (2-sample feedback = 1 sample @24kHz)
+			imaStepIdxL = Delay1.ar(Delay1.ar(imaStepIdxL_new));
+			imaPredL = Delay1.ar(Delay1.ar(imaPredL_new));
+			imaStepIdxR = Delay1.ar(Delay1.ar(imaStepIdxR_new));
+			imaPredR = Delay1.ar(Delay1.ar(imaPredR_new));
 			
-			writeR_adpcm = Latch.ar(writeR, adpcmTrigR);
-			adpcmStepSizeR = 16 * (1.1 ** adpcmStepR.round.clip(0, 48));
-			adpcmCodeR = ((writeR_adpcm - adpcmPredR) / (adpcmStepSizeR / 64)).round.clip(-32, 31) + 32;
-			adpcmCodeR = adpcmCodeR.round.clip(0, 63);
-			adpcmDiffR = ((adpcmCodeR * 2 + 1) * adpcmStepSizeR) / 64;
-			adpcmPredR_new = (adpcmPredR + Select.kr(adpcmCodeR >= 32, [adpcmDiffR, adpcmDiffR.neg])).clip(-1, 1);
-			adpcmStepR_new = (adpcmStepR + Select.kr(adpcmCodeR, [-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16,2,4,6,8,10,12,14,16])).round.clip(0, 48);
+			// LEFT CHANNEL — IMA ADPCM 4-bit encode/decode
+			// code = round((input-pred)/step*8), clip -8..7, +8 → 0..15
+			imaCodeL = ((Latch.ar(writeL, imaTrigL) - imaPredL)
+				/ BufRd.ar(1, imaStepSizeBuf, imaStepIdxL.round, interpolation: 0)
+				* 8).round.clip(-8, 7) + 8;
 			
-			// Select quantization: 8-bit linear, μ-law, or ADPCM
-			// For 8-bit/μ-law: quantize then SR reduce (Latch after)
-			// For ADPCM: SR reduce then encode (Latch before) — already done above
+			// stepIdx_new = stepIdx + indexAdjust[code & 7], clip 0..88
+			imaStepIdxL_new = (imaStepIdxL + BufRd.ar(1, imaIndexBuf,
+				imaCodeL - ((imaCodeL >= 8) * 8),
+				interpolation: 0)).round.clip(0, 88);
+			
+			// decodedDiff = ((mag*2+1)*step/8) * sign  where mag=code & 7, sign=1-2*(code>=8)
+			// pred_new = pred + decodedDiff, clip -1..1
+			imaPredL_new = (imaPredL + (
+				((imaCodeL - ((imaCodeL >= 8) * 8)) * 2 + 1)
+				* BufRd.ar(1, imaStepSizeBuf, imaStepIdxL.round, interpolation: 0) / 8
+				* (1 - (2 * (imaCodeL >= 8)))
+			)).clip(-1, 1);
+			
+			// RIGHT CHANNEL — same algorithm
+			imaCodeR = ((Latch.ar(writeR, imaTrigR) - imaPredR)
+				/ BufRd.ar(1, imaStepSizeBuf, imaStepIdxR.round, interpolation: 0)
+				* 8).round.clip(-8, 7) + 8;
+			
+			imaStepIdxR_new = (imaStepIdxR + BufRd.ar(1, imaIndexBuf,
+				imaCodeR - ((imaCodeR >= 8) * 8),
+				interpolation: 0)).round.clip(0, 88);
+			
+			imaPredR_new = (imaPredR + (
+				((imaCodeR - ((imaCodeR >= 8) * 8)) * 2 + 1)
+				* BufRd.ar(1, imaStepSizeBuf, imaStepIdxR.round, interpolation: 0) / 8
+				* (1 - (2 * (imaCodeR >= 8)))
+			)).clip(-1, 1);
+			
+			// Select quantization: 8-bit linear, μ-law, or IMA ADPCM
+			// 8-bit/μ-law: quantize first, then SR reduce with Latch
+			// IMA ADPCM: already latched internally (Latch before encode, pred_new is the output)
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
-				Latch.ar(writeL.round(0.5 ** bitDepthL), adpcmTrigL),  // 8-bit (is8L)
-				Latch.ar(muLawL, adpcmTrigL),                          // μ-law (is12L)
-				Latch.ar(writeL.round(0.5 ** bitDepthL), adpcmTrigL),  // 16-bit (unused)
-				adpcmPredL_new                                          // ADPCM (isAdpcmL) — already latched
+				Latch.ar(writeL.round(0.5 ** bitDepthL), imaTrigL),  // 8-bit (is8L)
+				Latch.ar(muLawL, imaTrigL),                          // μ-law (is12L)
+				Latch.ar(writeL.round(0.5 ** bitDepthL), imaTrigL),  // 16-bit (unused)
+				imaPredL_new                                          // IMA ADPCM (isAdpcmL)
 			]);
 			writeR = Select.ar(is8R + (is12R * 2) + (isAdpcmR * 3), [
-				Latch.ar(writeR.round(0.5 ** bitDepthR), adpcmTrigR),  // 8-bit
-				Latch.ar(muLawR, adpcmTrigR),                          // μ-law
-				Latch.ar(writeR.round(0.5 ** bitDepthR), adpcmTrigR),  // 16-bit (unused)
-				adpcmPredR_new                                          // ADPCM
+				Latch.ar(writeR.round(0.5 ** bitDepthR), imaTrigR),  // 8-bit
+				Latch.ar(muLawR, imaTrigR),                          // μ-law
+				Latch.ar(writeR.round(0.5 ** bitDepthR), imaTrigR),  // 16-bit (unused)
+				imaPredR_new                                          // IMA ADPCM
 			]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			// [v2.09] LocalOut: 10→14 channels (+adpcmStepL, adpcmPredL, adpcmStepR, adpcmPredR)
-			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar, adpcmStepL_new, adpcmPredL_new, adpcmStepR_new, adpcmPredR_new]);
+			// [v2.10] LocalOut: back to 10 channels (ADPCM state now in Delay1)
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
@@ -479,6 +522,7 @@ Engine_Ncoco : CroneEngine {
         // INSTANTIATE SPLIT SYNTHS
 		synth_core = Synth.new(\NcocoCore, [
             \bufL, bufL, \bufR, bufR, \inL, context.in_b[0].index, \inR, context.in_b[1].index,
+            \imaStepSizeBuf, imaStepSizeBuf, \imaIndexBuf, imaIndexBuf,  // [v2.10] IMA buffers
             \bus_tape_out, b_tape.index, \bus_mon_out, b_mon.index,
             \bus_bleed_out, b_bleed.index,
             \bus_mvol_out, b_mod_vol.index, \bus_mfilt_out, b_mod_filt.index,
@@ -623,7 +667,8 @@ Engine_Ncoco : CroneEngine {
         osc_responder.free; 
         synth_core.free; 
         synth_out.free; 
-        bufL.free; bufR.free; 
+        bufL.free; bufR.free;
+        imaStepSizeBuf.free; imaIndexBuf.free;  // [v2.10] free IMA buffers
         b_tape.free; b_mon.free; b_mod_vol.free; b_mod_filt.free; 
         b_bleed.free;
     }
