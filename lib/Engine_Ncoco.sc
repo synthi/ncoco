@@ -372,12 +372,22 @@ bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002
 // qErr_prev via LocalIn[10/11], qErr_prev2 via Delay1.ar
 
 // shapedL/R = señal normalizada + feedback noise shaping (clipped) + TPDF dither
-shapedL = (decL / bfpScaleL).clip(-1,1)
-	+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10])).clip(-2, 2)
-	+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))));
-shapedR = (decR / bfpScaleR).clip(-1,1)
-	+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11])).clip(-2, 2)
-	+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))));
+// Latch a srTrigL para correr noise shaping al rate decimado (32kHz), no a audio rate (48kHz)
+// Clip final a [-1,1] para evitar que la suma exceda rango antes de cuantizar
+shapedL = Latch.ar(
+	((decL / bfpScaleL).clip(-1,1)
+		+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10])).clip(-2, 2)
+		+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
+	).clip(-1, 1),
+	srTrigL
+);
+shapedR = Latch.ar(
+	((decR / bfpScaleR).clip(-1,1)
+		+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11])).clip(-2, 2)
+		+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
+	).clip(-1, 1),
+	srTrigR
+);
 
 dpcmReconL = BLowPass4.ar(BLowPass4.ar(
 	BHiShelf.ar(
@@ -395,21 +405,28 @@ dpcmReconR = BLowPass4.ar(BLowPass4.ar(
 14000, 0.7), 14000, 0.7);
 
 // qErrL/R para noise shaping: error de cuantización en dominio normalizado (clipped)
-qErrL = (shapedL - (shapedL * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1))).clip(-1, 1);
-qErrR = (shapedR - (shapedR * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1))).clip(-1, 1);
+// También latched a srTrigL para mantener sincronía con shapedL
+qErrL = Latch.ar(
+	(shapedL - (shapedL * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1))).clip(-1, 1),
+	srTrigL
+);
+qErrR = Latch.ar(
+	(shapedR - (shapedR * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1))).clip(-1, 1),
+	srTrigR
+);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
 				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 8-bit
 				Latch.ar(muLawL, srTrigL),                          // μ-law
 				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 12-bit (unused via μ-law)
-				dpcmReconL                                          // NICAM
+				Latch.ar(dpcmReconL, srTrigL)                       // NICAM (latched como los demás)
 			]);
 			writeR = Select.ar(is8R + (is12R * 2) + (isAdpcmR * 3), [
 				Latch.ar(writeR.round(0.5 ** bitDepthR), srTrigR),
 				Latch.ar(muLawR, srTrigR),
 				Latch.ar(writeR.round(0.5 ** bitDepthR), srTrigR),
-				dpcmReconR
+				Latch.ar(dpcmReconR, srTrigR)                       // NICAM (latched como los demás)
 			]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
