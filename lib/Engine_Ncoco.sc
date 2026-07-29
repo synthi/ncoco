@@ -363,20 +363,20 @@ bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002
 bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
 // Paso 4+5: TPDF dither + cuantización BFP + de-énfasis J.17 inversa (BHiShelf) — todo a 48kHz
-dpcmReconL = BHiShelf.ar(
-	((((decL / bfpScaleL).clip(-1,1)
-		+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
-	) * (2**(nicamBitsL.round.clip(2,16)-1))).round
-		/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
-	1383, 0.5, -18.25
-) * 2.0;
-dpcmReconR = BHiShelf.ar(
-	((((decR / bfpScaleR).clip(-1,1)
-		+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
-	) * (2**(nicamBitsR.round.clip(2,16)-1))).round
-		/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
-	1425, 0.5, -19.25
-) * 2.0;
+		dpcmReconL = BHiShelf.ar(
+			(((decL / bfpScaleL).clip(-1,1)
+				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
+			) * (2**(nicamBitsL.round.clip(2,16)-1))).round
+				/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
+			1383, 0.5, -18.25
+		) * 2.0;
+		dpcmReconR = BHiShelf.ar(
+			(((decR / bfpScaleR).clip(-1,1)
+				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
+			) * (2**(nicamBitsR.round.clip(2,16)-1))).round
+				/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
+			1425, 0.5, -19.25
+		) * 2.0;
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
