@@ -1,4 +1,4 @@
-// Engine_Ncoco.sc v2.14
+// Engine_Ncoco.sc v2.15
 // CHANGELOG v2.14:
 // 1. FIX: NICAM — 2× BLowPass4 anti-aliasing @ 12600/13000 + 2× BLowPass4 reconstrucción @ 12600/13000.
 //    - TPDF dither antes de Latch decorrelaciona ruido de cuantización.
@@ -356,21 +356,19 @@ decR = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 15000, 1.0), 15000, 1.0), 
 bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
 bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
-// Paso 4+5: TPDF dither + cuantización BFP + reconstrucción — todo a 48kHz, sin de-énfasis
-		dpcmReconL = BLowPass4.ar(
-			(((decL / bfpScaleL).clip(-1,1)
-				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
-			) * (2**(nicamBitsL.round.clip(2,16)-1))).round
-				/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
-			15000, 1.0
-		) * 0.7;
-		dpcmReconR = BLowPass4.ar(
-			(((decR / bfpScaleR).clip(-1,1)
-				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
-			) * (2**(nicamBitsR.round.clip(2,16)-1))).round
-				/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
-			15000, 1.0
-		) * 0.7;
+// Retrasamos la señal 1ms para sincronizar con el bfpScale de SU PROPIO bloque
+decL_del = DelayN.ar(decL, 0.001, 0.001);
+decR_del = DelayN.ar(decR, 0.001, 0.001);
+
+// Paso 4+5: TPDF dither corregido + cuantización BFP (sin filtro de reconstrucción redundante)
+		dpcmReconL = (((decL_del / bfpScaleL).clip(-1,1)
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
+		) * (2**(nicamBitsL.round.clip(2,16)-1))).round
+			/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL;
+		dpcmReconR = (((decR_del / bfpScaleR).clip(-1,1)
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
+		) * (2**(nicamBitsR.round.clip(2,16)-1))).round
+			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR;
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
