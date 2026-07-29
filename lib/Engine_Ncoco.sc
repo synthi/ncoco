@@ -195,7 +195,7 @@ Engine_Ncoco : CroneEngine {
 			
 			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 48000);
 			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 48000)) * 1.002;
-            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 16s000);
+            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 16000);
 			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
             inputR_sig = inputR_sig + (noiseR * 0.5);
