@@ -356,16 +356,13 @@ decR = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 15000, 1.0), 15000, 1.0), 
 bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
 bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
-// Retrasamos la señal 1ms para sincronizar con el bfpScale de SU PROPIO bloque
-decL_del = DelayN.ar(decL, 0.001, 0.001);
-decR_del = DelayN.ar(decR, 0.001, 0.001);
-
 // Paso 4+5: TPDF dither corregido + cuantización BFP (sin filtro de reconstrucción redundante)
-		dpcmReconL = (((decL_del / bfpScaleL).clip(-1,1)
+// DelayN 1ms inline para sincronizar señal con su propio bfpScale
+		dpcmReconL = (((DelayN.ar(decL, 0.001, 0.001) / bfpScaleL).clip(-1,1)
 			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
 		) * (2**(nicamBitsL.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL;
-		dpcmReconR = (((decR_del / bfpScaleR).clip(-1,1)
+		dpcmReconR = (((DelayN.ar(decR, 0.001, 0.001) / bfpScaleR).clip(-1,1)
 			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
 		) * (2**(nicamBitsR.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR;
