@@ -356,11 +356,9 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 		hiBandL = HPF.ar(writeL, 6800);
 		hiBandR = HPF.ar(writeR, 6800);
 
-// Cuantización: banda baja 10 bits (step=2^-9) + TPDF dither, banda alta 5 bits (step=2^-4) + TPDF dither
-		dpcmReconL = (loBandL + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (2 ** (-9)))).round(2 ** (-9))
-			+ (hiBandL + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (2 ** (-4)))).round(2 ** (-4));
-		dpcmReconR = (loBandR + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (2 ** (-9)))).round(2 ** (-9))
-			+ (hiBandR + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (2 ** (-4)))).round(2 ** (-4));
+// Cuantizacion: banda baja 10 bits (step=2^-9), banda alta 5 bits (step=2^-4) — sin dither
+	dpcmReconL = loBandL.round(2 ** (-9)) + hiBandL.round(2 ** (-4));
+	dpcmReconR = loBandR.round(2 ** (-9)) + hiBandR.round(2 ** (-4));
 
 			// Select quantization: 8-bit linear, μ-law, o SBC
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
