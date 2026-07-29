@@ -347,8 +347,8 @@ Engine_Ncoco : CroneEngine {
 				Select.ar(
  (((writeL - dpcmPrevL).sign - dpcmBitPrevL).abs < 0.001) * ((dpcmBitPrevL - Delay1.ar(dpcmBitPrevL)).abs < 0.001),
 					[
-						(0.002 + (dpcmDriveL * 0.01)) * -0.02,
-						(0.05 + (dpcmDriveL * 0.25)) * 0.15
+ K2A.ar((0.002 + (dpcmDriveL * 0.01)) * -0.02),
+ K2A.ar((0.05 + (dpcmDriveL * 0.25)) * 0.15)
 					]
 				),
 				0.995
@@ -364,8 +364,8 @@ Engine_Ncoco : CroneEngine {
 				Select.ar(
  (((writeR - dpcmPrevR).sign - dpcmBitPrevR).abs < 0.001) * ((dpcmBitPrevR - Delay1.ar(dpcmBitPrevR)).abs < 0.001),
 					[
-						(0.002 + (dpcmDriveR * 0.01)) * -0.02,
-						(0.05 + (dpcmDriveR * 0.25)) * 0.15
+ K2A.ar((0.002 + (dpcmDriveR * 0.01)) * -0.02),
+ K2A.ar((0.05 + (dpcmDriveR * 0.25)) * 0.15)
 					]
 				),
 				0.995
