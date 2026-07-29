@@ -160,16 +160,17 @@ Engine_Ncoco : CroneEngine {
 			var demandL, demandR, autoTrigL, autoTrigR, finalJumpTrigL, finalJumpTrigR;
 			var resetPosL, resetPosR;
             var src11_ar, src12_ar;
-			var muLawEncL, muLawQuantL, muLawL;
+            var muLawEncL, muLawQuantL, muLawL;
 			var muLawEncR, muLawQuantR, muLawR;
 			var isAdpcmL, isAdpcmR;
-			// [v2.14] NICAM — Block Floating Point + J.17 + 2+2 BLowPass4 + TPDF dither (10 vars)
+			// [v2.14] NICAM — BFP + J.17 + 2+2 BLowPass4 + noise shaping 2nd order + TPDF dither (12 vars)
 			var srTrigL, srTrigR;
 			var decL, decR, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
+			var qErrL, qErrR;
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(10);  // [v2.11] back to 10 (ADPCM state removed)
+            feedback_in = LocalIn.ar(12);  // [v2.14] 12 channels (+2 for noise shaping qErr)
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7];
 
@@ -335,7 +336,7 @@ Engine_Ncoco : CroneEngine {
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
-// ============ NICAM v2.14 — Block Floating Point + J.17 + anti-aliasing 2x + reconstruction 2x BLowPass4/canal ============
+// ============ NICAM v2.14 — Block Floating Point + J.17 + anti-aliasing 2x + reconstruction 2x + noise shaping 2nd order ============
 // Reemplaza CVSD. Modo activo cuando bitDepthL/R >= 14 (isAdpcmL/isAdpcmR).
 
 // srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
@@ -346,19 +347,19 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 blockTrigL = Impulse.ar(1000);
 blockTrigR = Impulse.ar(1000);
 
-// Paso 1+2: anti-aliasing (2× BLowPass4 cascaded) + pre-énfasis J.17 (BHiShelf) + TPDF dither + decimación a 32kHz
+// Paso 1+2: anti-aliasing (2× BLowPass4 cascaded @ 13000) + pre-énfasis J.17 (BHiShelf) + decimación a 32kHz
 decL = Latch.ar(
 	BHiShelf.ar(
-		BLowPass4.ar(BLowPass4.ar(writeL, 12600, 0.7), 12600, 0.7) * 0.5,
+		BLowPass4.ar(BLowPass4.ar(writeL, 13000, 0.7), 13000, 0.7) * 0.5,
 		1383, 0.5, 18.25
-	) + ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1)))),
+	),
 	srTrigL
 );
 decR = Latch.ar(
 	BHiShelf.ar(
 		BLowPass4.ar(BLowPass4.ar(writeR, 13000, 0.7), 13000, 0.7) * 0.5,
 		1425, 0.5, 19.25
-	) + ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1)))),
+	),
 	srTrigR
 );
 
@@ -366,21 +367,29 @@ decR = Latch.ar(
 bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
 bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
-// Paso 4+5+6: cuantización de mantisa + de-énfasis J.17 inversa (BHiShelf) + reconstrucción (2× BLowPass4)
+// Paso 4+5+6: noise shaping 2nd order [2,-1] + TPDF dither + cuantización + de-énfasis + reconstrucción (2× BLowPass4 @ 14000)
+// Noise shaping: qErr = input - quantized, feedback = 2*qErr_prev - qErr_prev2
+// qErr_prev via LocalIn[10/11], qErr_prev2 via Delay1.ar
 dpcmReconL = BLowPass4.ar(BLowPass4.ar(
 	BHiShelf.ar(
-		((decL / bfpScaleL).clip(-1,1) * (2**(nicamBitsL.round.clip(2,16)-1))).round
+		((((decL / bfpScaleL).clip(-1,1)
+			+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
+		) * (2**(nicamBitsL.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
 		1383, 0.5, -18.25
 	) * 2.0,
-12600, 0.7), 12600, 0.7);
+14000, 0.7), 14000, 0.7);
 dpcmReconR = BLowPass4.ar(BLowPass4.ar(
 	BHiShelf.ar(
-		((decR / bfpScaleR).clip(-1,1) * (2**(nicamBitsR.round.clip(2,16)-1))).round
+		((((decR / bfpScaleR).clip(-1,1)
+			+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
+		) * (2**(nicamBitsR.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
 		1425, 0.5, -19.25
 	) * 2.0,
-13000, 0.7), 13000, 0.7);
+14000, 0.7), 14000, 0.7);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
@@ -398,8 +407,23 @@ dpcmReconR = BLowPass4.ar(BLowPass4.ar(
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			// [v2.13] LocalOut: 10 channels (NICAM stateless)
-			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
+			// [v2.14] LocalOut: 12 channels (+2 for noise shaping qErrL/qErrR)
+			// qErr = (input + noise shaping feedback) - quantized, in normalized domain
+			qErrL = ((decL / bfpScaleL).clip(-1,1)
+				+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
+				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
+			) - ((((decL / bfpScaleL).clip(-1,1)
+				+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
+				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
+			) * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1)));
+			qErrR = ((decR / bfpScaleR).clip(-1,1)
+				+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
+				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
+			) - ((((decR / bfpScaleR).clip(-1,1)
+				+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
+				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
+			) * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1)));
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar, qErrL, qErrR]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
