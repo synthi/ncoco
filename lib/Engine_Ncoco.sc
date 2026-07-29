@@ -371,12 +371,12 @@ bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002
 // Noise shaping: qErr = input - quantized, feedback = 2*qErr_prev - qErr_prev2
 // qErr_prev via LocalIn[10/11], qErr_prev2 via Delay1.ar
 
-// shapedL/R = señal normalizada + feedback noise shaping + TPDF dither
+// shapedL/R = señal normalizada + feedback noise shaping (clipped) + TPDF dither
 shapedL = (decL / bfpScaleL).clip(-1,1)
-	+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
+	+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10])).clip(-2, 2)
 	+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))));
 shapedR = (decR / bfpScaleR).clip(-1,1)
-	+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
+	+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11])).clip(-2, 2)
 	+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))));
 
 dpcmReconL = BLowPass4.ar(BLowPass4.ar(
@@ -394,9 +394,9 @@ dpcmReconR = BLowPass4.ar(BLowPass4.ar(
 	) * 2.0,
 14000, 0.7), 14000, 0.7);
 
-// qErrL/R para noise shaping: error de cuantización en dominio normalizado
-qErrL = shapedL - (shapedL * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1));
-qErrR = shapedR - (shapedR * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1));
+// qErrL/R para noise shaping: error de cuantización en dominio normalizado (clipped)
+qErrL = (shapedL - (shapedL * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1))).clip(-1, 1);
+qErrR = (shapedR - (shapedR * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1))).clip(-1, 1);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
