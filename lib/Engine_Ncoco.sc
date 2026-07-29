@@ -370,26 +370,33 @@ bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002
 // Paso 4+5+6: noise shaping 2nd order [2,-1] + TPDF dither + cuantización + de-énfasis + reconstrucción (2× BLowPass4 @ 14000)
 // Noise shaping: qErr = input - quantized, feedback = 2*qErr_prev - qErr_prev2
 // qErr_prev via LocalIn[10/11], qErr_prev2 via Delay1.ar
+
+// shapedL/R = señal normalizada + feedback noise shaping + TPDF dither
+shapedL = (decL / bfpScaleL).clip(-1,1)
+	+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
+	+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))));
+shapedR = (decR / bfpScaleR).clip(-1,1)
+	+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
+	+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))));
+
 dpcmReconL = BLowPass4.ar(BLowPass4.ar(
 	BHiShelf.ar(
-		((((decL / bfpScaleL).clip(-1,1)
-			+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
-			+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
-		) * (2**(nicamBitsL.round.clip(2,16)-1))).round
+		(shapedL * (2**(nicamBitsL.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
 		1383, 0.5, -18.25
 	) * 2.0,
 14000, 0.7), 14000, 0.7);
 dpcmReconR = BLowPass4.ar(BLowPass4.ar(
 	BHiShelf.ar(
-		((((decR / bfpScaleR).clip(-1,1)
-			+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
-			+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
-		) * (2**(nicamBitsR.round.clip(2,16)-1))).round
+		(shapedR * (2**(nicamBitsR.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
 		1425, 0.5, -19.25
 	) * 2.0,
 14000, 0.7), 14000, 0.7);
+
+// qErrL/R para noise shaping: error de cuantización en dominio normalizado
+qErrL = shapedL - (shapedL * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1));
+qErrR = shapedR - (shapedR * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1));
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
@@ -408,21 +415,6 @@ dpcmReconR = BLowPass4.ar(BLowPass4.ar(
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
 			// [v2.14] LocalOut: 12 channels (+2 for noise shaping qErrL/qErrR)
-			// qErr = (input + noise shaping feedback) - quantized, in normalized domain
-			qErrL = ((decL / bfpScaleL).clip(-1,1)
-				+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
-				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
-			) - ((((decL / bfpScaleL).clip(-1,1)
-				+ (2 * feedback_in[10] - Delay1.ar(feedback_in[10]))
-				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
-			) * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1)));
-			qErrR = ((decR / bfpScaleR).clip(-1,1)
-				+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
-				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
-			) - ((((decR / bfpScaleR).clip(-1,1)
-				+ (2 * feedback_in[11] - Delay1.ar(feedback_in[11]))
-				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
-			) * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1)));
 			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar, qErrL, qErrR]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
