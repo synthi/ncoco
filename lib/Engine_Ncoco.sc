@@ -166,12 +166,14 @@ Engine_Ncoco : CroneEngine {
 			// [v2.14] NICAM — BFP + J.17 + anti-aliasing 4× BLowPass4 @ 15kHz + TPDF dither (10 vars, 48kHz native)
 			var srTrigL, srTrigR;
 			var decL, decR, decL_pre, decR_pre, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
+			var e1L, e1R, shapedL, shapedR, quantL, quantR, errL, errR;
 
 			// --- CORE DSP ---
 			
-            feedback_in = LocalIn.ar(10);  // [v2.11] 10 channels (NICAM v2.14 stateless, 48kHz native)
+            feedback_in = LocalIn.ar(12);  // [v2.15] 12 channels (NICAM noise shaping 1st order: +e1L, e1R)
 			fb_petals = feedback_in[0..5].tanh; 
 			fb_yellow = feedback_in[6..7];
+			e1L = feedback_in[10]; e1R = feedback_in[11];
 
 			preampNoiseL = PinkNoise.ar(((preampL - 6).max(0) * 0.0714).pow(2));
 			preampNoiseR = PinkNoise.ar(((preampR - 6).max(0) * 0.0714).pow(2));
@@ -335,45 +337,45 @@ Engine_Ncoco : CroneEngine {
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
-// ============ NICAM v2.15 — 48kHz nativo, BFP 2-16 bit, J.17 pre/de-émfasis, headroom 1dB ============
-// Reemplaza CVSD. Modo activo cuando bitDepthL/R >= 14 (isAdpcmL/isAdpcmR).
-// Sample rate 48kHz (native), blockTrigger 1000Hz (48 samples/block, 1ms).
-// J.17 pre-émfasis (+9dB) antes de BFP, de-émfasis (-9dB) después. Headroom *1.122 en scale.
-// TODO: vintage NICAM scale (escala discreta de 3 bits) — aplicar después como artifact opcional.
+// ============ NICAM v2.15 — 48kHz, BFP, J.17 exacto, noise shaping 1er orden, decorrelación ============
+// Modo activo cuando bitDepthL/R >= 14 (isAdpcmL/isAdpcmR).
+// 48kHz nativo, blockTrigger ~1000Hz con decorrelación ±0.3%.
+// J.17 pre/de-énfasis par exacto (+9/-9dB). Noise shaping 1er orden via LocalIn/Out.
 
 // srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
 srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
 srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
 
-// Trigger de bloque NICAM: 48 muestras/bloque a 48kHz = 1000 Hz
-blockTrigL = Impulse.ar(1000);
-blockTrigR = Impulse.ar(1000);
+// Trigger de bloque NICAM con decorrelación de fase (±0.3% @ ~0.1Hz)
+blockTrigL = Impulse.ar(1000 * (1 + LFNoise1.kr(0.13).range(-0.003, 0.003)));
+blockTrigR = Impulse.ar(1000 * (1 + LFNoise1.kr(0.11).range(-0.003, 0.003)));
 
 // Paso 1: anti-aliasing (3× BLowPass4 cascaded @ 15000, rq=1.0 flat)
 decL = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeL, 15000, 1.0), 15000, 1.0), 15000, 1.0);
 decR = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 15000, 1.0), 15000, 1.0), 15000, 1.0);
 
-// Paso 2: Pre-émfasis J.17 (+9dB, rs=1.0) con -6dB pad para headroom — ANTES de medir el pico
-decL_pre = BHiShelf.ar(decL * 0.5, 1389, 1.0, 9);
-decR_pre = BHiShelf.ar(decR * 0.5, 1419, 1.0, 9);
+// Paso 2: Pre-énfasis J.17 (+9dB, rs=1.0) — par exacto, SIN pad
+decL_pre = BHiShelf.ar(decL, 1389, 1.0, 9);
+decR_pre = BHiShelf.ar(decR, 1419, 1.0, 9);
 
 // Paso 3: BFP scale CON headroom (~+1dB), medido sobre la señal YA pre-enfatizada
-bfpScaleL = (Latch.ar(Delay1.ar(Peak.ar(decL_pre, blockTrigL)), blockTrigL).max(0.002)) * 1.122;
-bfpScaleR = (Latch.ar(Delay1.ar(Peak.ar(decR_pre, blockTrigR)), blockTrigR).max(0.002)) * 1.122;
+bfpScaleL = (Latch.ar(Delay1.ar(Peak.ar(decL_pre, blockTrigL)), blockTrigL)).max(0.002) * 1.122;
+bfpScaleR = (Latch.ar(Delay1.ar(Peak.ar(decR_pre, blockTrigR)), blockTrigR)).max(0.002) * 1.122;
 
-// Paso 4: TPDF dither corregido + cuantización BFP (DelayN 1ms inline para sincronizar con SU PROPIO scale)
-		dpcmReconL = (((DelayN.ar(decL_pre, 0.001, 0.001) / bfpScaleL).clip(-1,1)
-			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
-		) * (2**(nicamBitsL.round.clip(2,16)-1))).round
-			/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL;
-		dpcmReconR = (((DelayN.ar(decR_pre, 0.001, 0.001) / bfpScaleR).clip(-1,1)
-			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
-		) * (2**(nicamBitsR.round.clip(2,16)-1))).round
-			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR;
+// Paso 4: Noise shaping 1er orden + TPDF dither + cuantización BFP
+// shapedIn = signal_delayed/bfpScale + e1 (error de la muestra anterior)
+		shapedL = (DelayN.ar(decL_pre, 0.001, 0.001) / bfpScaleL + e1L).clip(-1, 1);
+		shapedR = (DelayN.ar(decR_pre, 0.001, 0.001) / bfpScaleR + e1R).clip(-1, 1);
+// Cuantización con dither TPDF (*0.5 = 2 LSB p-p)
+		quantL = ((shapedL + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))) * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1));
+		quantR = ((shapedR + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))) * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1));
+// Error de cuantización (para noise shaping del siguiente sample)
+		errL = shapedL - quantL;
+		errR = shapedR - quantR;
 
-// Paso 5: De-émfasis J.17 (-9dB, rs=1.0) con *2.0 boost (inverso del pad) + filtro de reconstrucción
-		dpcmReconL = BLowPass4.ar(BHiShelf.ar(dpcmReconL, 1389, 1.0, -9) * 2.0, 15000, 1.0);
-		dpcmReconR = BLowPass4.ar(BHiShelf.ar(dpcmReconR, 1419, 1.0, -9) * 2.0, 15000, 1.0);
+// Paso 5: De-énfasis J.17 (-9dB, rs=1.0) — par exacto, SIN *2.0 + filtro de reconstrucción
+		dpcmReconL = BLowPass4.ar(BHiShelf.ar(quantL * bfpScaleL, 1389, 1.0, -9), 15000, 1.0);
+		dpcmReconR = BLowPass4.ar(BHiShelf.ar(quantR * bfpScaleR, 1419, 1.0, -9), 15000, 1.0);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
@@ -391,8 +393,8 @@ bfpScaleR = (Latch.ar(Delay1.ar(Peak.ar(decR_pre, blockTrigR)), blockTrigR).max(
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			// [v2.14] LocalOut: 10 channels (NICAM stateless, sin noise shaping)
-			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
+			// [v2.15] LocalOut: 12 channels (NICAM noise shaping 1st order: +errL, errR)
+			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar, errL, errR]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
 
