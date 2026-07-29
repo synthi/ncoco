@@ -49,9 +49,9 @@ function Params.init(SC, G, _16n)
   params:set_action("16n_orient", function(x) _16n.set_inverted(x == 2) end)
 
   -- [v2.12] CVSD Drive (solo activo en modo 1bit CVSD)
-  params:add_control("dpcm_drive_l", "CVSD Drive L", controlspec.new(0, 1, "lin", 0.01, 0.4, ""))
+  params:add_control("dpcm_drive_l", "CVSD Drive L", controlspec.new(0, 1, "lin", 0.01, 0.35, ""))
   params:set_action("dpcm_drive_l", function(v) engine.dpcmDriveL(v) end)
-  params:add_control("dpcm_drive_r", "CVSD Drive R", controlspec.new(0, 1, "lin", 0.01, 0.4, ""))
+  params:add_control("dpcm_drive_r", "CVSD Drive R", controlspec.new(0, 1, "lin", 0.01, 0.35, ""))
   params:set_action("dpcm_drive_r", function(v) engine.dpcmDriveR(v) end)
 
   params:add_group("TAPE OPS", 7)

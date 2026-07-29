@@ -96,7 +96,7 @@ Engine_Ncoco : CroneEngine {
             cocoSlewL=0.1, cocoSlewR=0.1,
 
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0,
-			dpcmDriveL=0.4, dpcmDriveR=0.4;
+			dpcmDriveL=0.35, dpcmDriveR=0.35;
 
 			// --- VARS ---
 			var dest_gains = NamedControl.kr(\dest_gains, 1!24); 
@@ -347,14 +347,14 @@ Engine_Ncoco : CroneEngine {
 				Select.ar(
  (((writeL - dpcmPrevL).sign - dpcmBitPrevL).abs < 0.001) * ((dpcmBitPrevL - Delay1.ar(dpcmBitPrevL)).abs < 0.001),
 					[
- K2A.ar((0.002 + (dpcmDriveL * 0.01)) * -0.02),
- K2A.ar((0.05 + (dpcmDriveL * 0.25)) * 0.15)
+ K2A.ar((0.0018 + (dpcmDriveL * 0.006)) * -0.02),
+ K2A.ar((0.008 + (dpcmDriveL * 0.22)) * 0.15)
 					]
 				),
 				0.995
-			).clip(0.002 + (dpcmDriveL * 0.01), 0.05 + (dpcmDriveL * 0.25));
+			).clip(0.0018 + (dpcmDriveL * 0.006), 0.008 + (dpcmDriveL * 0.22));
 
-			dpcmReconL = LeakDC.ar(Integrator.ar((writeL - dpcmPrevL).sign * dpcmStepL, 0.995));
+			dpcmReconL = LPF.ar(LeakDC.ar(Integrator.ar((writeL - dpcmPrevL).sign * dpcmStepL, 0.995)), fixedFiltFreqL).clip(-1, 1);
 
 			// RIGHT — CVSD encode/decode (4 vars)
 			dpcmPrevR = Delay1.ar(writeR);
@@ -364,14 +364,14 @@ Engine_Ncoco : CroneEngine {
 				Select.ar(
  (((writeR - dpcmPrevR).sign - dpcmBitPrevR).abs < 0.001) * ((dpcmBitPrevR - Delay1.ar(dpcmBitPrevR)).abs < 0.001),
 					[
- K2A.ar((0.002 + (dpcmDriveR * 0.01)) * -0.02),
- K2A.ar((0.05 + (dpcmDriveR * 0.25)) * 0.15)
+ K2A.ar((0.0018 + (dpcmDriveR * 0.006)) * -0.02),
+ K2A.ar((0.008 + (dpcmDriveR * 0.22)) * 0.15)
 					]
 				),
 				0.995
-			).clip(0.002 + (dpcmDriveR * 0.01), 0.05 + (dpcmDriveR * 0.25));
+			).clip(0.0018 + (dpcmDriveR * 0.006), 0.008 + (dpcmDriveR * 0.22));
 
-			dpcmReconR = LeakDC.ar(Integrator.ar((writeR - dpcmPrevR).sign * dpcmStepR, 0.995));
+			dpcmReconR = LPF.ar(LeakDC.ar(Integrator.ar((writeR - dpcmPrevR).sign * dpcmStepR, 0.995)), fixedFiltFreqL * 1.04).clip(-1, 1);
 
 			// Select quantization: 8-bit linear, μ-law, or CVSD
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
