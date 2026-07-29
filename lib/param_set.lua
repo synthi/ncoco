@@ -20,7 +20,7 @@ local Params = {}
 function Params.init(SC, G, _16n)
   params:add_separator("Ncoco")
   
-  params:add_group("GLOBALS", 8) -- Increased count for 16n Orientation
+  params:add_group("GLOBALS", 6)
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
@@ -47,12 +47,6 @@ function Params.init(SC, G, _16n)
   -- 16n Fader Orientation (Normal/Inverted)
   params:add_option("16n_orient", "16n Orientation", {"Normal", "Inverted"}, 1)
   params:set_action("16n_orient", function(x) _16n.set_inverted(x == 2) end)
-
-  -- [v2.12] CVSD Drive (solo activo en modo 1bit CVSD)
-  params:add_control("dpcm_drive_l", "CVSD Drive L", controlspec.new(0, 1, "lin", 0.01, 0.35, ""))
-  params:set_action("dpcm_drive_l", function(v) engine.dpcmDriveL(v) end)
-  params:add_control("dpcm_drive_r", "CVSD Drive R", controlspec.new(0, 1, "lin", 0.01, 0.35, ""))
-  params:set_action("dpcm_drive_r", function(v) engine.dpcmDriveR(v) end)
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
@@ -97,7 +91,7 @@ function Params.init(SC, G, _16n)
     local s = (i==1) and "L" or "R"
     local num = (i==1) and "1" or "2"
     
-    params:add_group("COCO "..num, 17) 
+    params:add_group("COCO "..num, 18) 
     
     params:add_control("vol_"..string.lower(s), "Volume "..num, controlspec.new(0, 2.0, "lin", 0, 1.0))
     params:set_action("vol_"..string.lower(s), function(x) SC.set_amp(i, x) end)
@@ -126,6 +120,11 @@ function Params.init(SC, G, _16n)
     params:set_action("bits"..s, function(x) 
        local b = (x==1) and 8 or ((x==2) and 12 or 14)
        SC.set_bitdepth(i,b) 
+    end)
+    
+    params:add_control("dpcm_drive"..s, "CVSD Drive "..num, controlspec.new(0, 1, "lin", 0.01, 0.35, ""))
+    params:set_action("dpcm_drive"..s, function(v)
+      if s=="L" then engine.dpcmDriveL(v) else engine.dpcmDriveR(v) end
     end)
     
     params:add_option("coco"..num.."_out_mode", "Out Mode "..num, {"Envelope", "Audio"}, 1)
