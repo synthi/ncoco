@@ -1,6 +1,8 @@
 -- lib/param_set.lua v2.14
+-- CHANGELOG v2.20:
+-- 1. REPLACE: "NICAM" -> "SBC" (Sub-Band Coding). Eliminado param nicam_bits (SBC es hardcoded 10+5).
 -- CHANGELOG v2.14:
--- 1. FIX: GLOBALS group count 6→7 (16n_orient was falling outside).
+-- 1. FIX: GLOBALS group count 6->7 (16n_orient was falling outside).
 -- CHANGELOG v2.08:
 -- 1. NEW: "16n Orientation" param (Normal/Inverted) in GLOBALS.
 -- 2. RENAME: "12bit" label changed to "μ-law" (SC interprets bitDepthL==12 as μ-law).
@@ -118,15 +120,10 @@ function Params.init(SC, G, _16n)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-     params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "NICAM"}, 1)
+     params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "SBC"}, 1)
     params:set_action("bits"..s, function(x) 
        local b = (x==1) and 8 or ((x==2) and 12 or 14)
        SC.set_bitdepth(i,b) 
-    end)
-    
-    params:add_control("nicam_bits"..s, "NICAM Bits "..num, controlspec.new(2, 16, 'lin', 1, 10, ""))
-    params:set_action("nicam_bits"..s, function(v)
-      if s=="L" then engine.nicamBitsL(v) else engine.nicamBitsR(v) end
     end)
     
     params:add_option("coco"..num.."_out_mode", "Out Mode "..num, {"Envelope", "Audio"}, 1)

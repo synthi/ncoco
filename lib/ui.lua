@@ -26,7 +26,7 @@ local DST_NAMES = {
   [21]="VOL 1", [22]="VOL 2",
   [23]="AUD IN 1", [24]="AUD IN 2"
 }
-local BIT_NAMES = {[1]="8bit", [2]="u-law", [3]="NICAM"}
+local BIT_NAMES = {[1]="8bit", [2]="u-law", [3]="SBC"}
 
 function UI.update_histories(G)
   for i=1, 2 do
@@ -249,9 +249,6 @@ function UI.draw_edit_menu(G, id)
   local title = is_link and "[ < STEREO LINK > ]" or ("COCO "..id) 
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(5,10); screen.text(title); screen.move(120,10); screen.text_right("K3: "..(BIT_NAMES[bit_idx]))
-  if bit_idx == 3 then
-    screen.move(120,25); screen.text_right("E4:BIT "..string.format("%d", params:get("nicam_bits"..side)))
-  end
   screen.move(10,30); screen.text("E1: FILT "..string.format("%.2f",filt)); screen.move(10,45); screen.text("E2: SPD "..string.format("%.2f",speed))
   screen.move(10,60); screen.text("E3: FB "..math.floor(fb*100).."%")
   UI.draw_popup(G)

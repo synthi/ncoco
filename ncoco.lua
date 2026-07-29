@@ -550,16 +550,12 @@ function enc(n,d)
     elseif n==3 then 
        params:delta("fb"..c, d/3); 
        if is_link then params:delta("fbR", d/3) end
-    elseif n==4 then
-       params:delta("nicam_bits"..c, d);
-       if is_link then params:delta("nicam_bitsR", d) end
     end
   elseif G.focus.edit_r then
     local c = "R"
     if n==1 then params:delta("filt"..c, d)
     elseif n==2 then params:delta("speed"..c, d/10)
     elseif n==3 then params:delta("fb"..c, d/3)
-    elseif n==4 then params:delta("nicam_bits"..c, d) end 
   else
     if n==1 then params:delta("global_vol", d) end
     if n==2 then params:delta("monitor_vol", d) end 
