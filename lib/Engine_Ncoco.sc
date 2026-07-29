@@ -353,9 +353,9 @@ blockTrigR = Impulse.ar(1000);
 decL = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeL, 15000, 1.0), 15000, 1.0), 15000, 1.0);
 decR = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 15000, 1.0), 15000, 1.0), 15000, 1.0);
 
-// Paso 2: Pre-émfasis J.17 (+9dB) con -6dB pad para headroom — ANTES de medir el pico
-decL_pre = BHiShelf.ar(decL * 0.5, 1389, 0, 9);
-decR_pre = BHiShelf.ar(decR * 0.5, 1419, 0, 9);
+// Paso 2: Pre-émfasis J.17 (+9dB, rs=1.0) con -6dB pad para headroom — ANTES de medir el pico
+decL_pre = BHiShelf.ar(decL * 0.5, 1389, 1.0, 9);
+decR_pre = BHiShelf.ar(decR * 0.5, 1419, 1.0, 9);
 
 // Paso 3: BFP scale CON headroom (~+1dB), medido sobre la señal YA pre-enfatizada
 bfpScaleL = (Latch.ar(Delay1.ar(Peak.ar(decL_pre, blockTrigL)), blockTrigL).max(0.002)) * 1.122;
@@ -371,9 +371,9 @@ bfpScaleR = (Latch.ar(Delay1.ar(Peak.ar(decR_pre, blockTrigR)), blockTrigR).max(
 		) * (2**(nicamBitsR.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR;
 
-// Paso 5: De-émfasis J.17 (-9dB) con *2.0 boost (inverso del pad) + filtro de reconstrucción
-		dpcmReconL = BLowPass4.ar(BHiShelf.ar(dpcmReconL, 1389, 0, -9) * 2.0, 15000, 1.0);
-		dpcmReconR = BLowPass4.ar(BHiShelf.ar(dpcmReconR, 1419, 0, -9) * 2.0, 15000, 1.0);
+// Paso 5: De-émfasis J.17 (-9dB, rs=1.0) con *2.0 boost (inverso del pad) + filtro de reconstrucción
+		dpcmReconL = BLowPass4.ar(BHiShelf.ar(dpcmReconL, 1389, 1.0, -9) * 2.0, 15000, 1.0);
+		dpcmReconR = BLowPass4.ar(BHiShelf.ar(dpcmReconR, 1419, 1.0, -9) * 2.0, 15000, 1.0);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
