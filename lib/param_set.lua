@@ -41,18 +41,8 @@ function Params.init(SC, G, _16n)
   params:add_option("dj_filter_type", "DJ Filter Type", {"Classic", "Analog"}, 1)
   params:set_action("dj_filter_type", function(x)
     engine.dj_filter_type(x-1)
-    if x == 2 then
-      params:show("dfm1_gain")
-    else
-      params:hide("dfm1_gain")
-    end
     _menu.rebuild_params()
   end)
-
-  -- [v2.07] Analog Filter Gain (only visible when Analog is selected)
-  params:add_control("dfm1_gain", "Analog Filter Gain", controlspec.new(0.05, 1.0, "lin", 0.01, 0.32))
-  params:set_action("dfm1_gain", function(x) engine.dj_filter_gain(x) end)
-  params:hide("dfm1_gain")
 
   -- 16n Fader Orientation (Normal/Inverted)
   params:add_option("16n_orient", "16n Orientation", {"Normal", "Inverted"}, 1)

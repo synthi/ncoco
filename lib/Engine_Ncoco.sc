@@ -345,7 +345,7 @@ Engine_Ncoco : CroneEngine {
 
 			dpcmStepL = Integrator.ar(
 				Select.ar(
-					(((writeL - dpcmPrevL).sign) == dpcmBitPrevL) * (dpcmBitPrevL == Delay1.ar(dpcmBitPrevL)),
+ (((writeL - dpcmPrevL).sign - dpcmBitPrevL).abs < 0.001) * ((dpcmBitPrevL - Delay1.ar(dpcmBitPrevL)).abs < 0.001),
 					[
 						(0.002 + (dpcmDriveL * 0.01)) * -0.02,
 						(0.05 + (dpcmDriveL * 0.25)) * 0.15
@@ -362,7 +362,7 @@ Engine_Ncoco : CroneEngine {
 
 			dpcmStepR = Integrator.ar(
 				Select.ar(
-					(((writeR - dpcmPrevR).sign) == dpcmBitPrevR) * (dpcmBitPrevR == Delay1.ar(dpcmBitPrevR)),
+ (((writeR - dpcmPrevR).sign - dpcmBitPrevR).abs < 0.001) * ((dpcmBitPrevR - Delay1.ar(dpcmBitPrevR)).abs < 0.001),
 					[
 						(0.002 + (dpcmDriveR * 0.01)) * -0.02,
 						(0.05 + (dpcmDriveR * 0.25)) * 0.15

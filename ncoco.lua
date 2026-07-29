@@ -1,4 +1,8 @@
--- ncoco.lua v2.05
+-- ncoco.lua v2.12
+-- CHANGELOG v2.12:
+-- 1. REWRITE: "ADPCM" → "1bit CVSD" (Continuously Variable Slope Delta modulation).
+-- 2. HARDCODE: DFM1 gain fijado a 0.32, param dfm1_gain eliminado.
+-- 3. NEW: CVSD Drive L/R params (dpcm_drive_l, dpcm_drive_r), default 0.4.
 -- CHANGELOG v2.05:
 -- 1. FIX: Grid freeze recovery — logging, nuclear option (g:all(0)), g = grid.connect() on reconnect.
 -- 2. FIX: 16n orientation now uses taper pivot 80/47 instead of inverting values.

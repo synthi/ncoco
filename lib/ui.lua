@@ -1,4 +1,6 @@
--- lib/ui.lua v2.03 
+-- lib/ui.lua v2.12
+-- CHANGELOG v2.12:
+-- 1. RENAME: BIT_NAMES[3] "ADPCM" → "1bit CVSD".
 -- CHANGELOG v2.02:
 -- 1. RENAME: BIT_NAMES[2] "12bit" → "μ-law".
 
