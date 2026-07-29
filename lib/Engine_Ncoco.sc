@@ -165,7 +165,7 @@ Engine_Ncoco : CroneEngine {
 			var isAdpcmL, isAdpcmR;
 			// [v2.14] NICAM — BFP + J.17 + anti-aliasing 4× BLowPass4 @ 15kHz + TPDF dither (10 vars, 48kHz native)
 			var srTrigL, srTrigR;
-			var decL, decR, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
+			var decL, decR, decL_pre, decR_pre, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
 
 			// --- CORE DSP ---
 			
@@ -335,10 +335,11 @@ Engine_Ncoco : CroneEngine {
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
-// ============ NICAM v2.14 — 48kHz nativo, BFP 2-16 bit, J.17, anti-aliasing 4× BLowPass4 @ 15kHz ============
+// ============ NICAM v2.15 — 48kHz nativo, BFP 2-16 bit, J.17 pre/de-émfasis, headroom 1dB ============
 // Reemplaza CVSD. Modo activo cuando bitDepthL/R >= 14 (isAdpcmL/isAdpcmR).
 // Sample rate 48kHz (native), blockTrigger 1000Hz (48 samples/block, 1ms).
-// Sin decimación, sin noise shaping, sin filtro de reconstrucción — todo corre a 48kHz.
+// J.17 pre-émfasis (+9dB) antes de BFP, de-émfasis (-9dB) después. Headroom *1.122 en scale.
+// TODO: vintage NICAM scale (escala discreta de 3 bits) — aplicar después como artifact opcional.
 
 // srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
 srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
@@ -348,24 +349,31 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 blockTrigL = Impulse.ar(1000);
 blockTrigR = Impulse.ar(1000);
 
-// Paso 1+2: anti-aliasing (3× BLowPass4 cascaded @ 15000, rq=1.0 flat) — sin pre-énfasis
+// Paso 1: anti-aliasing (3× BLowPass4 cascaded @ 15000, rq=1.0 flat)
 decL = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeL, 15000, 1.0), 15000, 1.0), 15000, 1.0);
 decR = BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 15000, 1.0), 15000, 1.0), 15000, 1.0);
 
-// Paso 3: BFP (Block Floating Point) — peak del bloque con Delay1 anti-race-condition
-bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
-bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
+// Paso 2: Pre-émfasis J.17 (+9dB) con -6dB pad para headroom — ANTES de medir el pico
+decL_pre = BHiShelf.ar(decL * 0.5, 1389, 0, 9);
+decR_pre = BHiShelf.ar(decR * 0.5, 1419, 0, 9);
 
-// Paso 4+5: TPDF dither corregido + cuantización BFP (sin filtro de reconstrucción redundante)
-// DelayN 1ms inline para sincronizar señal con su propio bfpScale
-		dpcmReconL = (((DelayN.ar(decL, 0.001, 0.001) / bfpScaleL).clip(-1,1)
+// Paso 3: BFP scale CON headroom (~+1dB), medido sobre la señal YA pre-enfatizada
+bfpScaleL = (Latch.ar(Delay1.ar(Peak.ar(decL_pre, blockTrigL)), blockTrigL).max(0.002)) * 1.122;
+bfpScaleR = (Latch.ar(Delay1.ar(Peak.ar(decR_pre, blockTrigR)), blockTrigR).max(0.002)) * 1.122;
+
+// Paso 4: TPDF dither corregido + cuantización BFP (DelayN 1ms inline para sincronizar con SU PROPIO scale)
+		dpcmReconL = (((DelayN.ar(decL_pre, 0.001, 0.001) / bfpScaleL).clip(-1,1)
 			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
 		) * (2**(nicamBitsL.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL;
-		dpcmReconR = (((DelayN.ar(decR, 0.001, 0.001) / bfpScaleR).clip(-1,1)
+		dpcmReconR = (((DelayN.ar(decR_pre, 0.001, 0.001) / bfpScaleR).clip(-1,1)
 			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
 		) * (2**(nicamBitsR.round.clip(2,16)-1))).round
 			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR;
+
+// Paso 5: De-émfasis J.17 (-9dB) con *2.0 boost (inverso del pad) + filtro de reconstrucción
+		dpcmReconL = BLowPass4.ar(BHiShelf.ar(dpcmReconL, 1389, 0, -9) * 2.0, 15000, 1.0);
+		dpcmReconR = BLowPass4.ar(BHiShelf.ar(dpcmReconR, 1419, 0, -9) * 2.0, 15000, 1.0);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
