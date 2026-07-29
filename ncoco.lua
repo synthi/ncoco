@@ -555,7 +555,7 @@ function enc(n,d)
     local c = "R"
     if n==1 then params:delta("filt"..c, d)
     elseif n==2 then params:delta("speed"..c, d/10)
-    elseif n==3 then params:delta("fb"..c, d/3)
+    elseif n==3 then params:delta("fb"..c, d/3) end
   else
     if n==1 then params:delta("global_vol", d) end
     if n==2 then params:delta("monitor_vol", d) end 
