@@ -22,7 +22,7 @@ local DST_NAMES = {
   [21]="VOL 1", [22]="VOL 2",
   [23]="AUD IN 1", [24]="AUD IN 2"
 }
-local BIT_NAMES = {[1]="8bit", [2]="u-law", [3]="ADPCM"}
+local BIT_NAMES = {[1]="8bit", [2]="u-law", [3]="1bit CVSD"}
 
 function UI.update_histories(G)
   for i=1, 2 do

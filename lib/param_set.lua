@@ -58,6 +58,12 @@ function Params.init(SC, G, _16n)
   params:add_option("16n_orient", "16n Orientation", {"Normal", "Inverted"}, 1)
   params:set_action("16n_orient", function(x) _16n.set_inverted(x == 2) end)
 
+  -- [v2.12] CVSD Drive (solo activo en modo 1bit CVSD)
+  params:add_control("dpcm_drive_l", "CVSD Drive L", controlspec.new(0, 1, "lin", 0.01, 0.4, ""))
+  params:set_action("dpcm_drive_l", function(v) engine.dpcmDriveL(v) end)
+  params:add_control("dpcm_drive_r", "CVSD Drive R", controlspec.new(0, 1, "lin", 0.01, 0.4, ""))
+  params:set_action("dpcm_drive_r", function(v) engine.dpcmDriveR(v) end)
+
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)
   
@@ -126,7 +132,7 @@ function Params.init(SC, G, _16n)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-    params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "ADPCM"}, 1)
+     params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "1bit CVSD"}, 1)
     params:set_action("bits"..s, function(x) 
        local b = (x==1) and 8 or ((x==2) and 12 or 14)
        SC.set_bitdepth(i,b) 

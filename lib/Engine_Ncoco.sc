@@ -1,10 +1,12 @@
-// Engine_Ncoco.sc v2.11
+// Engine_Ncoco.sc v2.12
+// CHANGELOG v2.12:
+// 1. REWRITE: CVSD (Continuously Variable Slope Delta modulation) replaces broken delta mod.
+//    - 1 bit/muestra (signo), companding de step a audio-rate vía Integrator.ar.
+//    - Syllabic filter: detecta 3 bits iguales → slope overload → step crece rápido.
+//    - 10 vars total (2 menos que v2.11). Sin self-reference, sin LocalIn/Out extra.
+//    - Default dpcmDrive 0.4 (más conservador que v2.11).
+// 2. HARDCODE: DFM1 gain fijado a 0.32 inline (eliminado arg + addCommand + param).
 // CHANGELOG v2.11:
-// 1. REWRITE: ADPCM replaced with 4-bit delta modulation (not predictive DPCM).
-//    - Sample-accurate recursion via Integrator.ar (core UGen, no LocalIn/Out needed).
-//    - LocalIn/Out back to 10 channels (matches pre-ADPCM baseline).
-//    - New param dpcmDriveL/R (0-1) controls quantization step size, mapped exponentially.
-//    - srTrigL/R (renamed from adpcmTrigL/R) still shared with 8-bit/μ-law SR reduction — unchanged.
 // CHANGELOG v2.09:
 // 1. NEW: ADPCM 6-bit G.726 mode replaces 16-bit (bitDepthL/R==14).
 //    - 22kHz sample rate, filter 10000, jitter 0.01, bleed 0.003, noise 0.002
@@ -94,7 +96,7 @@ Engine_Ncoco : CroneEngine {
             cocoSlewL=0.1, cocoSlewR=0.1,
 
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0,
-			dpcmDriveL=0.5, dpcmDriveR=0.5;
+			dpcmDriveL=0.4, dpcmDriveR=0.4;
 
 			// --- VARS ---
 			var dest_gains = NamedControl.kr(\dest_gains, 1!24); 
@@ -156,10 +158,10 @@ Engine_Ncoco : CroneEngine {
 			var muLawEncL, muLawQuantL, muLawL;
 			var muLawEncR, muLawQuantR, muLawR;
 			var isAdpcmL, isAdpcmR;
-			// [v2.11] 4-bit delta modulation state (10 vars)
+			// [v2.12] CVSD — 1-bit syllabic companding (10 vars)
 			var srTrigL, srTrigR;
-			var dpcmPrevL, dpcmDeltaL, dpcmStepL, dpcmQuantL, dpcmReconL;
-			var dpcmPrevR, dpcmDeltaR, dpcmStepR, dpcmQuantR, dpcmReconR;
+			var dpcmPrevL, dpcmBitPrevL, dpcmStepL, dpcmReconL;
+			var dpcmPrevR, dpcmBitPrevR, dpcmStepR, dpcmReconR;
 
 			// --- CORE DSP ---
 			
@@ -329,33 +331,54 @@ Engine_Ncoco : CroneEngine {
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
-			// [v2.11] 4-bit Delta Modulation (no predictor loop — sample-accurate via Integrator.ar)
-			// Sustituye el ADPCM G.726 de v2.09. Sin buffers, sin LocalIn/Out extra.
-			// srTrigL/R: mismo SR-reduction trigger que usan 8-bit y μ-law.
+			// [v2.12] CVSD — Continuously Variable Slope Delta modulation.
+			// 1 bit/muestra (signo), companding de step a audio-rate vía Integrator.ar.
+			// Syllabic filter: 3 bits iguales → slope overload → step crece rápido.
+			// srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
 
 			srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
 			srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
 
+			// LEFT — CVSD encode/decode (4 vars: dpcmPrevL, dpcmBitPrevL, dpcmStepL, dpcmReconL)
 			dpcmPrevL = Delay1.ar(writeL);
-			dpcmDeltaL = writeL - dpcmPrevL;
-			dpcmStepL = (Amplitude.kr(writeL, 0.01, 0.1) * 0.5 + 0.02).clip(0.01, 0.3)
-				* dpcmDriveL.linexp(0, 1, 0.3, 4.0);
-			dpcmQuantL = (dpcmDeltaL / dpcmStepL).round.clip(-8, 7) * dpcmStepL;
-			dpcmReconL = LeakDC.ar(Integrator.ar(dpcmQuantL, 0.995));
+			dpcmBitPrevL = Delay1.ar((writeL - dpcmPrevL).sign);
 
+			dpcmStepL = Integrator.ar(
+				Select.ar(
+					(((writeL - dpcmPrevL).sign) == dpcmBitPrevL) * (dpcmBitPrevL == Delay1.ar(dpcmBitPrevL)),
+					[
+						(0.002 + (dpcmDriveL * 0.01)) * -0.02,
+						(0.05 + (dpcmDriveL * 0.25)) * 0.15
+					]
+				),
+				0.995
+			).clip(0.002 + (dpcmDriveL * 0.01), 0.05 + (dpcmDriveL * 0.25));
+
+			dpcmReconL = LeakDC.ar(Integrator.ar((writeL - dpcmPrevL).sign * dpcmStepL, 0.995));
+
+			// RIGHT — CVSD encode/decode (4 vars)
 			dpcmPrevR = Delay1.ar(writeR);
-			dpcmDeltaR = writeR - dpcmPrevR;
-			dpcmStepR = (Amplitude.kr(writeR, 0.01, 0.1) * 0.5 + 0.02).clip(0.01, 0.3)
-				* dpcmDriveR.linexp(0, 1, 0.3, 4.0);
-			dpcmQuantR = (dpcmDeltaR / dpcmStepR).round.clip(-8, 7) * dpcmStepR;
-			dpcmReconR = LeakDC.ar(Integrator.ar(dpcmQuantR, 0.995));
+			dpcmBitPrevR = Delay1.ar((writeR - dpcmPrevR).sign);
 
-			// Select quantization: 8-bit linear, μ-law, or 4-bit delta modulation
+			dpcmStepR = Integrator.ar(
+				Select.ar(
+					(((writeR - dpcmPrevR).sign) == dpcmBitPrevR) * (dpcmBitPrevR == Delay1.ar(dpcmBitPrevR)),
+					[
+						(0.002 + (dpcmDriveR * 0.01)) * -0.02,
+						(0.05 + (dpcmDriveR * 0.25)) * 0.15
+					]
+				),
+				0.995
+			).clip(0.002 + (dpcmDriveR * 0.01), 0.05 + (dpcmDriveR * 0.25));
+
+			dpcmReconR = LeakDC.ar(Integrator.ar((writeR - dpcmPrevR).sign * dpcmStepR, 0.995));
+
+			// Select quantization: 8-bit linear, μ-law, or CVSD
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
-				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 8-bit (is8L)
-				Latch.ar(muLawL, srTrigL),                          // μ-law (is12L)
+				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 8-bit
+				Latch.ar(muLawL, srTrigL),                          // μ-law
 				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 16-bit (unused)
-				dpcmReconL                                          // Delta mod (isAdpcmL)
+				dpcmReconL                                          // CVSD
 			]);
 			writeR = Select.ar(is8R + (is12R * 2) + (isAdpcmR * 3), [
 				Latch.ar(writeR.round(0.5 ** bitDepthR), srTrigR),
@@ -366,7 +389,7 @@ Engine_Ncoco : CroneEngine {
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			// [v2.11] LocalOut: back to 10 channels (ADPCM state removed)
+			// [v2.12] LocalOut: back to 10 channels (CVSD state in Integrator.ar)
 			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
@@ -388,8 +411,7 @@ Engine_Ncoco : CroneEngine {
             bus_mvol_in, bus_mfilt_in,
             filtL=0, filtR=0, ampL=1.0, ampR=1.0, panL= -0.5, panR=0.5, monitorLevel=0,
             bleedPost=0,
-            djFilterType=0,
-            dfm1Gain=0.32;
+            djFilterType=0;
 
             var readL, readR, monL, monR, bleedL, bleedR;
             var mod_vol, mod_filt;
@@ -439,10 +461,10 @@ Engine_Ncoco : CroneEngine {
 
             dfm1L = DFM1.ar(sigL * 0.7, lpfFreqL, 0, 1.0, 0, 0.0003);
             dfm1L = DFM1.ar(dfm1L, lpfFreqL, 0, 1.0, 0, 0.0003);
-            dfm1L = HPF.ar(dfm1L, hpfFreqL) * dfm1Gain;
+            dfm1L = HPF.ar(dfm1L, hpfFreqL) * 0.32;
             dfm1R = DFM1.ar(sigR * 0.7, lpfFreqR, 0, 1.0, 0, 0.0003);
             dfm1R = DFM1.ar(dfm1R, lpfFreqR, 0, 1.0, 0, 0.0003);
-            dfm1R = HPF.ar(dfm1R, hpfFreqR) * dfm1Gain;
+            dfm1R = HPF.ar(dfm1R, hpfFreqR) * 0.32;
 
 			sigL = Select.ar(totalFiltL.abs < 0.05, [
 				Select.ar(djFilterType, [classicL, dfm1L]),
@@ -572,7 +594,6 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("monitorLevel", "f", { |msg| synth_out.set(\monitorLevel, msg[1]) });
         this.addCommand("bleedPost", "f", { |msg| synth_out.set(\bleedPost, msg[1]) });
         this.addCommand("dj_filter_type", "f", { |msg| synth_out.set(\djFilterType, msg[1]) });
-        this.addCommand("dj_filter_gain", "f", { |msg| synth_out.set(\dfm1Gain, msg[1]) });
 
         // PARAMS -> BOTH (Amp controls visual in Core and audio in Out)
         this.addCommand("ampL", "f", { |msg| 
@@ -610,7 +631,7 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("mod_audioInL", "ffffffffffff", { |msg| synth_core.setn(\mod_audioInL_Amts, msg.drop(1)) });
 		this.addCommand("mod_audioInR", "ffffffffffff", { |msg| synth_core.setn(\mod_audioInR_Amts, msg.drop(1)) });
 
-		// [v2.11] Delta modulation drive
+		// [v2.12] CVSD drive
 		this.addCommand("dpcmDriveL", "f", { |msg| synth_core.set(\dpcmDriveL, msg[1]) });
 		this.addCommand("dpcmDriveR", "f", { |msg| synth_core.set(\dpcmDriveR, msg[1]) });
 	}
