@@ -1,8 +1,8 @@
--- ncoco.lua v2.12
--- CHANGELOG v2.12:
--- 1. REWRITE: "ADPCM" → "1bit CVSD" (Continuously Variable Slope Delta modulation).
+-- ncoco.lua v2.13
+-- CHANGELOG v2.13:
+-- 1. REWRITE: "1bit CVSD" → "NICAM" (Block Floating Point + J.17).
 -- 2. HARDCODE: DFM1 gain fijado a 0.32, param dfm1_gain eliminado.
--- 3. NEW: CVSD Drive L/R params (dpcm_drive_l, dpcm_drive_r), default 0.4.
+-- 3. NEW: NICAM Bits L/R params (nicam_bits_l, nicam_bits_r), default 10.
 -- CHANGELOG v2.05:
 -- 1. FIX: Grid freeze recovery — logging, nuclear option (g:all(0)), g = grid.connect() on reconnect.
 -- 2. FIX: 16n orientation now uses taper pivot 80/47 instead of inverting values.
@@ -547,15 +547,15 @@ function enc(n,d)
        params:delta("fb"..c, d/3); 
        if is_link then params:delta("fbR", d/3) end
     elseif n==4 then
-       params:delta("dpcm_drive"..c, d/3);
-       if is_link then params:delta("dpcm_driveR", d/3) end
+       params:delta("nicam_bits"..c, d);
+       if is_link then params:delta("nicam_bitsR", d) end
     end
   elseif G.focus.edit_r then
     local c = "R"
     if n==1 then params:delta("filt"..c, d)
     elseif n==2 then params:delta("speed"..c, d/10)
     elseif n==3 then params:delta("fb"..c, d/3)
-    elseif n==4 then params:delta("dpcm_drive"..c, d/3) end 
+    elseif n==4 then params:delta("nicam_bits"..c, d) end 
   else
     if n==1 then params:delta("global_vol", d) end
     if n==2 then params:delta("monitor_vol", d) end 

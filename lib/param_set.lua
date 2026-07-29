@@ -1,4 +1,4 @@
--- lib/param_set.lua v2.08
+-- lib/param_set.lua v2.13
 -- CHANGELOG v2.08:
 -- 1. NEW: "16n Orientation" param (Normal/Inverted) in GLOBALS.
 -- 2. RENAME: "12bit" label changed to "μ-law" (SC interprets bitDepthL==12 as μ-law).
@@ -116,15 +116,15 @@ function Params.init(SC, G, _16n)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-     params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "1bit CVSD"}, 1)
+     params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "NICAM"}, 1)
     params:set_action("bits"..s, function(x) 
        local b = (x==1) and 8 or ((x==2) and 12 or 14)
        SC.set_bitdepth(i,b) 
     end)
     
-    params:add_control("dpcm_drive"..s, "CVSD Drive "..num, controlspec.new(0, 1, "lin", 0.01, 0.35, ""))
-    params:set_action("dpcm_drive"..s, function(v)
-      if s=="L" then engine.dpcmDriveL(v) else engine.dpcmDriveR(v) end
+    params:add_control("nicam_bits"..s, "NICAM Bits "..num, controlspec.new(2, 16, 'lin', 1, 10, ""))
+    params:set_action("nicam_bits"..s, function(v)
+      if s=="L" then engine.nicamBitsL(v) else engine.nicamBitsR(v) end
     end)
     
     params:add_option("coco"..num.."_out_mode", "Out Mode "..num, {"Envelope", "Audio"}, 1)

@@ -1,10 +1,11 @@
-// Engine_Ncoco.sc v2.12
-// CHANGELOG v2.12:
-// 1. REWRITE: CVSD (Continuously Variable Slope Delta modulation) replaces broken delta mod.
-//    - 1 bit/muestra (signo), companding de step a audio-rate vía Integrator.ar.
-//    - Syllabic filter: detecta 3 bits iguales → slope overload → step crece rápido.
-//    - 10 vars total (2 menos que v2.11). Sin self-reference, sin LocalIn/Out extra.
-//    - Default dpcmDrive 0.4 (más conservador que v2.11).
+// Engine_Ncoco.sc v2.13
+// CHANGELOG v2.13:
+// 1. REWRITE: NICAM (Block Floating Point + J.17 companding) replaces CVSD.
+//    - Sample rate 32kHz (isAdpcmL/R mode), BFP 2-16 bit mantissa (default 10).
+//    - 3× BLowPass4 cascadeadas por canal para anti-aliasing (12800/13200 Hz L/R).
+//    - Pre-énfasis J.17 (BHiShelf, 1383/1425 Hz L/R) antes de cuantización.
+//    - Filtro feedback ajustado a 14kHz.
+//    - 10 vars total (mismo presupuesto que CVSD).
 // 2. HARDCODE: DFM1 gain fijado a 0.32 inline (eliminado arg + addCommand + param).
 // CHANGELOG v2.11:
 // CHANGELOG v2.09:
@@ -96,7 +97,7 @@ Engine_Ncoco : CroneEngine {
             cocoSlewL=0.1, cocoSlewR=0.1,
 
 			slew_speed=0.1, slew_amp=0.05, slew_misc=0,
-			dpcmDriveL=0.35, dpcmDriveR=0.35;
+			nicamBitsL=10, nicamBitsR=10;
 
 			// --- VARS ---
 			var dest_gains = NamedControl.kr(\dest_gains, 1!24); 
@@ -158,10 +159,9 @@ Engine_Ncoco : CroneEngine {
 			var muLawEncL, muLawQuantL, muLawL;
 			var muLawEncR, muLawQuantR, muLawR;
 			var isAdpcmL, isAdpcmR;
-			// [v2.12] CVSD — 1-bit syllabic companding (10 vars)
+			// [v2.13] NICAM — Block Floating Point + J.17 (10 vars)
 			var srTrigL, srTrigR;
-			var dpcmPrevL, dpcmBitPrevL, dpcmStepL, dpcmReconL;
-			var dpcmPrevR, dpcmBitPrevR, dpcmStepR, dpcmReconR;
+			var decL, decR, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
 
 			// --- CORE DSP ---
 			
@@ -189,9 +189,9 @@ Engine_Ncoco : CroneEngine {
 			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.004) + (isAdpcmL * 0.002));
 			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.004) + (isAdpcmR * 0.002));
 			
-			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 22000);
-			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 22000)) * 1.002;
-            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 10000);
+			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 32000);
+			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 32000)) * 1.002;
+            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 14000);
 			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
             inputR_sig = inputR_sig + (noiseR * 0.5);
@@ -331,54 +331,55 @@ Engine_Ncoco : CroneEngine {
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
-			// [v2.12] CVSD — Continuously Variable Slope Delta modulation.
-			// 1 bit/muestra (signo), companding de step a audio-rate vía Integrator.ar.
-			// Syllabic filter: 3 bits iguales → slope overload → step crece rápido.
-			// srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
+			// ============ NICAM v2.13 — Block Floating Point + J.17 + anti-aliasing 3x BLowPass4/canal ============
+			// Reemplaza CVSD. Modo activo cuando bitDepthL/R >= 14 (isAdpcmL/isAdpcmR).
 
+			// srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
 			srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
 			srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
 
-			// LEFT — CVSD encode/decode (4 vars: dpcmPrevL, dpcmBitPrevL, dpcmStepL, dpcmReconL)
-			dpcmPrevL = Delay1.ar(writeL);
-			dpcmBitPrevL = Delay1.ar((writeL - dpcmPrevL).sign);
+			// Trigger de bloque NICAM: cada 32 muestras a 32kHz = 1000 Hz
+			blockTrigL = Impulse.ar(1000);
+			blockTrigR = Impulse.ar(1000);
 
-			dpcmStepL = Integrator.ar(
-				Select.ar(
- (((writeL - dpcmPrevL).sign - dpcmBitPrevL).abs < 0.001) * ((dpcmBitPrevL - Delay1.ar(dpcmBitPrevL)).abs < 0.001),
-					[
- K2A.ar((0.0018 + (dpcmDriveL * 0.006)) * -0.02),
- K2A.ar((0.008 + (dpcmDriveL * 0.22)) * 0.15)
-					]
+			// Paso 1+2+3: anti-aliasing (3× BLowPass4 cascaded) + pre-énfasis J.17 (BHiShelf) + decimación a 32kHz
+			decL = Latch.ar(
+				BHiShelf.ar(
+					BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeL, 12800, 0.7), 12800, 0.7), 12800, 0.7) * 0.5,
+					1383, 0.5, 18.25
 				),
-				0.995
-			).clip(0.0018 + (dpcmDriveL * 0.006), 0.008 + (dpcmDriveL * 0.22));
-
-			dpcmReconL = LPF.ar(LeakDC.ar(Integrator.ar((writeL - dpcmPrevL).sign * dpcmStepL, 0.995)), fixedFiltFreqL).clip(-1, 1);
-
-			// RIGHT — CVSD encode/decode (4 vars)
-			dpcmPrevR = Delay1.ar(writeR);
-			dpcmBitPrevR = Delay1.ar((writeR - dpcmPrevR).sign);
-
-			dpcmStepR = Integrator.ar(
-				Select.ar(
- (((writeR - dpcmPrevR).sign - dpcmBitPrevR).abs < 0.001) * ((dpcmBitPrevR - Delay1.ar(dpcmBitPrevR)).abs < 0.001),
-					[
- K2A.ar((0.0018 + (dpcmDriveR * 0.006)) * -0.02),
- K2A.ar((0.008 + (dpcmDriveR * 0.22)) * 0.15)
-					]
+				srTrigL
+			);
+			decR = Latch.ar(
+				BHiShelf.ar(
+					BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 13200, 0.7), 13200, 0.7), 13200, 0.7) * 0.5,
+					1425, 0.5, 19.25
 				),
-				0.995
-			).clip(0.0018 + (dpcmDriveR * 0.006), 0.008 + (dpcmDriveR * 0.22));
+				srTrigR
+			);
 
-			dpcmReconR = LPF.ar(LeakDC.ar(Integrator.ar((writeR - dpcmPrevR).sign * dpcmStepR, 0.995)), fixedFiltFreqL * 1.04).clip(-1, 1);
+			// Paso 4: BFP (Block Floating Point) — peak del bloque con Delay1 anti-race-condition
+			bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
+			bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
-			// Select quantization: 8-bit linear, μ-law, or CVSD
+			// Paso 5+6: cuantización de mantisa + de-énfasis J.17 inversa (BLowShelf)
+			dpcmReconL = BLowShelf.ar(
+				((decL / bfpScaleL).clip(-1,1) * (2**(nicamBitsL.round.clip(2,16)-1))).round
+					/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
+				1383, 0.5, -18.25
+			) * 2.0;
+			dpcmReconR = BLowShelf.ar(
+				((decR / bfpScaleR).clip(-1,1) * (2**(nicamBitsR.round.clip(2,16)-1))).round
+					/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
+				1425, 0.5, -19.25
+			) * 2.0;
+
+			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
 				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 8-bit
 				Latch.ar(muLawL, srTrigL),                          // μ-law
-				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 16-bit (unused)
-				dpcmReconL                                          // CVSD
+				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 12-bit (unused via μ-law)
+				dpcmReconL                                          // NICAM
 			]);
 			writeR = Select.ar(is8R + (is12R * 2) + (isAdpcmR * 3), [
 				Latch.ar(writeR.round(0.5 ** bitDepthR), srTrigR),
@@ -389,7 +390,7 @@ Engine_Ncoco : CroneEngine {
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
 
-			// [v2.12] LocalOut: back to 10 channels (CVSD state in Integrator.ar)
+			// [v2.13] LocalOut: 10 channels (NICAM stateless)
 			LocalOut.ar([p1, p2, p3, p4, p5, p6, yellowL, yellowR, src11_ar, src12_ar]);
 			osc_trigger = Impulse.kr(30);
 			SendReply.kr(osc_trigger, '/update', [A2K.kr(ptrL/endL.max(1)), A2K.kr(ptrR/endR.max(1)), A2K.kr(gateRecL), A2K.kr(gateRecR), K2A.ar(flipStateL), K2A.ar(flipStateR), K2A.ar((skipL + mod_val_skipL).clip(0,1)), K2A.ar((skipR + mod_val_skipR).clip(0,1)), A2K.kr(out1), A2K.kr(out2), A2K.kr(out3), A2K.kr(out4), A2K.kr(out5), A2K.kr(out6), envL, envR, A2K.kr(yellowL), A2K.kr(yellowR), K2A.ar(finalRateL), K2A.ar(finalRateR), A2K.kr(Amplitude.ar(readL*ampL)), A2K.kr(Amplitude.ar(readR*ampR)), A2K.kr(src11_ar), A2K.kr(src12_ar)]);
@@ -631,9 +632,9 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("mod_audioInL", "ffffffffffff", { |msg| synth_core.setn(\mod_audioInL_Amts, msg.drop(1)) });
 		this.addCommand("mod_audioInR", "ffffffffffff", { |msg| synth_core.setn(\mod_audioInR_Amts, msg.drop(1)) });
 
-		// [v2.12] CVSD drive
-		this.addCommand("dpcmDriveL", "f", { |msg| synth_core.set(\dpcmDriveL, msg[1]) });
-		this.addCommand("dpcmDriveR", "f", { |msg| synth_core.set(\dpcmDriveR, msg[1]) });
+		// [v2.13] NICAM bits
+		this.addCommand("nicamBitsL", "f", { |msg| synth_core.set(\nicamBitsL, msg[1]) });
+		this.addCommand("nicamBitsR", "f", { |msg| synth_core.set(\nicamBitsR, msg[1]) });
 	}
 
 	free { 
