@@ -166,7 +166,7 @@ Engine_Ncoco : CroneEngine {
 			// [v2.14] NICAM — BFP + J.17 + anti-aliasing 4× BLowPass4 @ 15kHz + TPDF dither (10 vars, 48kHz native)
 			var srTrigL, srTrigR;
 			var decL, decR, decL_pre, decR_pre, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
-			var e1L, e1R, shapedL, shapedR, quantL, quantR, errL, errR;
+			var e1L, e1R, errL, errR;
 
 			// --- CORE DSP ---
 			
@@ -362,20 +362,22 @@ decR_pre = BHiShelf.ar(decR, 1419, 1.0, 9);
 bfpScaleL = (Latch.ar(Delay1.ar(Peak.ar(decL_pre, blockTrigL)), blockTrigL)).max(0.002) * 1.122;
 bfpScaleR = (Latch.ar(Delay1.ar(Peak.ar(decR_pre, blockTrigR)), blockTrigR)).max(0.002) * 1.122;
 
-// Paso 4: Noise shaping 1er orden + TPDF dither + cuantización BFP
-// shapedIn = signal_delayed/bfpScale + e1 (error de la muestra anterior)
-		shapedL = (DelayN.ar(decL_pre, 0.001, 0.001) / bfpScaleL + e1L).clip(-1, 1);
-		shapedR = (DelayN.ar(decR_pre, 0.001, 0.001) / bfpScaleR + e1R).clip(-1, 1);
-// Cuantización con dither TPDF (*0.5 = 2 LSB p-p)
-		quantL = ((shapedL + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))) * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1));
-		quantR = ((shapedR + ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))) * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1));
-// Error de cuantización (para noise shaping del siguiente sample)
-		errL = shapedL - quantL;
-		errR = shapedR - quantR;
-
-// Paso 5: De-énfasis J.17 (-9dB, rs=1.0) — par exacto, SIN *2.0 + filtro de reconstrucción
-		dpcmReconL = BLowPass4.ar(BHiShelf.ar(quantL * bfpScaleL, 1389, 1.0, -9), 15000, 1.0);
-		dpcmReconR = BLowPass4.ar(BHiShelf.ar(quantR * bfpScaleR, 1419, 1.0, -9), 15000, 1.0);
+// Paso 4+5: Noise shaping 1er orden + TPDF dither + cuantización BFP + de-énfasis (todo inline)
+// shapedIn = signal_delayed/bfpScale + e1 (error de la muestra anterior), cuantizado, error realimentado
+		errL = (DelayN.ar(decL_pre, 0.001, 0.001) / bfpScaleL + e1L).clip(-1, 1)
+			- ((((DelayN.ar(decL_pre, 0.001, 0.001) / bfpScaleL + e1L).clip(-1, 1)
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))) * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1)));
+		errR = (DelayN.ar(decR_pre, 0.001, 0.001) / bfpScaleR + e1R).clip(-1, 1)
+			- ((((DelayN.ar(decR_pre, 0.001, 0.001) / bfpScaleR + e1R).clip(-1, 1)
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))) * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1)));
+		dpcmReconL = BLowPass4.ar(BHiShelf.ar(
+			((((DelayN.ar(decL_pre, 0.001, 0.001) / bfpScaleL + e1L).clip(-1, 1)
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))) * (2**(nicamBitsL.round.clip(2,16)-1))).round / (2**(nicamBitsL.round.clip(2,16)-1)))
+			* bfpScaleL, 1389, 1.0, -9), 15000, 1.0);
+		dpcmReconR = BLowPass4.ar(BHiShelf.ar(
+			((((DelayN.ar(decR_pre, 0.001, 0.001) / bfpScaleR + e1R).clip(-1, 1)
+			+ ((WhiteNoise.ar + WhiteNoise.ar) * 0.5 * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))) * (2**(nicamBitsR.round.clip(2,16)-1))).round / (2**(nicamBitsR.round.clip(2,16)-1)))
+			* bfpScaleR, 1419, 1.0, -9), 15000, 1.0);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
