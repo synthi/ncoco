@@ -1,4 +1,8 @@
--- ncoco.lua v2.13
+-- ncoco.lua v2.14
+-- CHANGELOG v2.14:
+-- 1. FIX: NICAM — 2× BLowPass4 anti-aliasing + 2× reconstrucción + TPDF dither.
+-- 2. FIX: E4 bits text only visible in NICAM mode.
+-- 3. FIX: GLOBALS group count 6→7 (16n_orient was outside).
 -- CHANGELOG v2.13:
 -- 1. REWRITE: "1bit CVSD" → "NICAM" (Block Floating Point + J.17).
 -- 2. HARDCODE: DFM1 gain fijado a 0.32, param dfm1_gain eliminado.
@@ -445,7 +449,7 @@ function init()
     clock_ids[5] = cid_16n
     
     G.loaded = true 
-    print("Ncoco v2.05 Ready.")
+    print("Ncoco v2.14 Ready.")
   end)
 end
 

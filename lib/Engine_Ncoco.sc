@@ -1,4 +1,8 @@
-// Engine_Ncoco.sc v2.13
+// Engine_Ncoco.sc v2.14
+// CHANGELOG v2.14:
+// 1. FIX: NICAM — 2× BLowPass4 anti-aliasing @ 12600/13000 + 2× BLowPass4 reconstrucción @ 12600/13000.
+//    - TPDF dither antes de Latch decorrelaciona ruido de cuantización.
+//    - De-énfasis corregido: BHiShelf -18.25dB (corta agudos, no graves).
 // CHANGELOG v2.13:
 // 1. REWRITE: NICAM (Block Floating Point + J.17 companding) replaces CVSD.
 //    - Sample rate 32kHz (isAdpcmL/R mode), BFP 2-16 bit mantissa (default 10).
@@ -159,7 +163,7 @@ Engine_Ncoco : CroneEngine {
 			var muLawEncL, muLawQuantL, muLawL;
 			var muLawEncR, muLawQuantR, muLawR;
 			var isAdpcmL, isAdpcmR;
-			// [v2.13] NICAM — Block Floating Point + J.17 (10 vars)
+			// [v2.14] NICAM — Block Floating Point + J.17 + 2+2 BLowPass4 + TPDF dither (10 vars)
 			var srTrigL, srTrigR;
 			var decL, decR, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
 
@@ -331,48 +335,52 @@ Engine_Ncoco : CroneEngine {
 			muLawQuantR = muLawEncR.round(2/255);
 			muLawR = muLawQuantR.sign * ((muLawQuantR.abs * 256.log).exp - 1) / 255;
 			
-			// ============ NICAM v2.13 — Block Floating Point + J.17 + anti-aliasing 3x BLowPass4/canal ============
-			// Reemplaza CVSD. Modo activo cuando bitDepthL/R >= 14 (isAdpcmL/isAdpcmR).
+// ============ NICAM v2.14 — Block Floating Point + J.17 + anti-aliasing 2x + reconstruction 2x BLowPass4/canal ============
+// Reemplaza CVSD. Modo activo cuando bitDepthL/R >= 14 (isAdpcmL/isAdpcmR).
 
-			// srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
-			srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
-			srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
+// srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
+srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
+srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
 
-			// Trigger de bloque NICAM: cada 32 muestras a 32kHz = 1000 Hz
-			blockTrigL = Impulse.ar(1000);
-			blockTrigR = Impulse.ar(1000);
+// Trigger de bloque NICAM: cada 32 muestras a 32kHz = 1000 Hz
+blockTrigL = Impulse.ar(1000);
+blockTrigR = Impulse.ar(1000);
 
-			// Paso 1+2+3: anti-aliasing (3× BLowPass4 cascaded) + pre-énfasis J.17 (BHiShelf) + decimación a 32kHz
-			decL = Latch.ar(
-				BHiShelf.ar(
-					BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeL, 12800, 0.7), 12800, 0.7), 12800, 0.7) * 0.5,
-					1383, 0.5, 18.25
-				),
-				srTrigL
-			);
-			decR = Latch.ar(
-				BHiShelf.ar(
-					BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 13200, 0.7), 13200, 0.7), 13200, 0.7) * 0.5,
-					1425, 0.5, 19.25
-				),
-				srTrigR
-			);
+// Paso 1+2: anti-aliasing (2× BLowPass4 cascaded) + pre-énfasis J.17 (BHiShelf) + TPDF dither + decimación a 32kHz
+decL = Latch.ar(
+	BHiShelf.ar(
+		BLowPass4.ar(BLowPass4.ar(writeL, 12600, 0.7), 12600, 0.7) * 0.5,
+		1383, 0.5, 18.25
+	) + ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1)))),
+	srTrigL
+);
+decR = Latch.ar(
+	BHiShelf.ar(
+		BLowPass4.ar(BLowPass4.ar(writeR, 13000, 0.7), 13000, 0.7) * 0.5,
+		1425, 0.5, 19.25
+	) + ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1)))),
+	srTrigR
+);
 
-			// Paso 4: BFP (Block Floating Point) — peak del bloque con Delay1 anti-race-condition
-			bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
-			bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
+// Paso 3: BFP (Block Floating Point) — peak del bloque con Delay1 anti-race-condition
+bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
+bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
-			// Paso 5+6: cuantización de mantisa + de-énfasis J.17 inversa (BLowShelf)
-			dpcmReconL = BHiShelf.ar(
-				((decL / bfpScaleL).clip(-1,1) * (2**(nicamBitsL.round.clip(2,16)-1))).round
-					/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
-				1383, 0.5, -18.25
-			) * 2.0;
-			dpcmReconR = BHiShelf.ar(
-				((decR / bfpScaleR).clip(-1,1) * (2**(nicamBitsR.round.clip(2,16)-1))).round
-					/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
-				1425, 0.5, -19.25
-			) * 2.0;
+// Paso 4+5+6: cuantización de mantisa + de-énfasis J.17 inversa (BHiShelf) + reconstrucción (2× BLowPass4)
+dpcmReconL = BLowPass4.ar(BLowPass4.ar(
+	BHiShelf.ar(
+		((decL / bfpScaleL).clip(-1,1) * (2**(nicamBitsL.round.clip(2,16)-1))).round
+			/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
+		1383, 0.5, -18.25
+	) * 2.0,
+12600, 0.7), 12600, 0.7);
+dpcmReconR = BLowPass4.ar(BLowPass4.ar(
+	BHiShelf.ar(
+		((decR / bfpScaleR).clip(-1,1) * (2**(nicamBitsR.round.clip(2,16)-1))).round
+			/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
+		1425, 0.5, -19.25
+	) * 2.0,
+13000, 0.7), 13000, 0.7);
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
@@ -632,7 +640,7 @@ Engine_Ncoco : CroneEngine {
 		this.addCommand("mod_audioInL", "ffffffffffff", { |msg| synth_core.setn(\mod_audioInL_Amts, msg.drop(1)) });
 		this.addCommand("mod_audioInR", "ffffffffffff", { |msg| synth_core.setn(\mod_audioInR_Amts, msg.drop(1)) });
 
-		// [v2.13] NICAM bits
+		// [v2.14] NICAM bits
 		this.addCommand("nicamBitsL", "f", { |msg| synth_core.set(\nicamBitsL, msg[1]) });
 		this.addCommand("nicamBitsR", "f", { |msg| synth_core.set(\nicamBitsR, msg[1]) });
 	}

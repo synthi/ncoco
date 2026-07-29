@@ -1,4 +1,6 @@
--- lib/ui.lua v2.13
+-- lib/ui.lua v2.14
+-- CHANGELOG v2.14:
+-- 1. FIX: E4 bits text only visible in NICAM mode (bit_idx==3).
 -- CHANGELOG v2.12:
 -- 1. RENAME: BIT_NAMES[3] "ADPCM" → "1bit CVSD".
 -- CHANGELOG v2.02:
@@ -247,7 +249,9 @@ function UI.draw_edit_menu(G, id)
   local title = is_link and "[ < STEREO LINK > ]" or ("COCO "..id) 
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(5,10); screen.text(title); screen.move(120,10); screen.text_right("K3: "..(BIT_NAMES[bit_idx]))
-	screen.move(120,25); screen.text_right("E4:BIT "..string.format("%d", params:get("nicam_bits"..side)))
+  if bit_idx == 3 then
+    screen.move(120,25); screen.text_right("E4:BIT "..string.format("%d", params:get("nicam_bits"..side)))
+  end
   screen.move(10,30); screen.text("E1: FILT "..string.format("%.2f",filt)); screen.move(10,45); screen.text("E2: SPD "..string.format("%.2f",speed))
   screen.move(10,60); screen.text("E3: FB "..math.floor(fb*100).."%")
   UI.draw_popup(G)

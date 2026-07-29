@@ -1,4 +1,6 @@
--- lib/param_set.lua v2.13
+-- lib/param_set.lua v2.14
+-- CHANGELOG v2.14:
+-- 1. FIX: GLOBALS group count 6→7 (16n_orient was falling outside).
 -- CHANGELOG v2.08:
 -- 1. NEW: "16n Orientation" param (Normal/Inverted) in GLOBALS.
 -- 2. RENAME: "12bit" label changed to "μ-law" (SC interprets bitDepthL==12 as μ-law).
@@ -20,7 +22,7 @@ local Params = {}
 function Params.init(SC, G, _16n)
   params:add_separator("Ncoco")
   
-  params:add_group("GLOBALS", 6)
+  params:add_group("GLOBALS", 7)
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
