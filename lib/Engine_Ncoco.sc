@@ -363,12 +363,12 @@ Engine_Ncoco : CroneEngine {
 			bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
 			// Paso 5+6: cuantización de mantisa + de-énfasis J.17 inversa (BLowShelf)
-			dpcmReconL = BLowShelf.ar(
+			dpcmReconL = BHiShelf.ar(
 				((decL / bfpScaleL).clip(-1,1) * (2**(nicamBitsL.round.clip(2,16)-1))).round
 					/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
 				1383, 0.5, -18.25
 			) * 2.0;
-			dpcmReconR = BLowShelf.ar(
+			dpcmReconR = BHiShelf.ar(
 				((decR / bfpScaleR).clip(-1,1) * (2**(nicamBitsR.round.clip(2,16)-1))).round
 					/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
 				1425, 0.5, -19.25
