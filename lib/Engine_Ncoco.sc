@@ -166,7 +166,7 @@ Engine_Ncoco : CroneEngine {
 			// [v2.14] NICAM — BFP + J.17 + 2+2 BLowPass4 + noise shaping 2nd order + TPDF dither (12 vars)
 			var srTrigL, srTrigR;
 			var decL, decR, blockTrigL, blockTrigR, bfpScaleL, bfpScaleR, dpcmReconL, dpcmReconR;
-			var qErrL, qErrR;
+			var shapedL, shapedR, qErrL, qErrR;
 
 			// --- CORE DSP ---
 			
