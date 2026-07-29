@@ -195,7 +195,7 @@ Engine_Ncoco : CroneEngine {
 			
 			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 48000);
 			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 48000)) * 1.002;
-            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 16000);
+            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 14000);
 			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
             inputR_sig = inputR_sig + (noiseR * 0.5);
@@ -348,13 +348,13 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 blockTrigL = Impulse.ar(1000);
 blockTrigR = Impulse.ar(1000);
 
-// Paso 1+2: anti-aliasing (4× BLowPass4 cascaded @ 15000) + pre-énfasis J.17 (BHiShelf) — sin decimación
+// Paso 1+2: anti-aliasing (3× BLowPass4 cascaded @ 15000, rq=1.0 flat) + pre-énfasis J.17 (BHiShelf) — sin decimación
 decL = BHiShelf.ar(
-	BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeL, 15000, 0.7), 15000, 0.7), 15000, 0.7), 15000, 0.7) * 0.5,
+	BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeL, 15000, 1.0), 15000, 1.0), 15000, 1.0) * 0.5,
 	1383, 0.5, 18.25
 );
 decR = BHiShelf.ar(
-	BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 15000, 0.7), 15000, 0.7), 15000, 0.7), 15000, 0.7) * 0.5,
+	BLowPass4.ar(BLowPass4.ar(BLowPass4.ar(writeR, 15000, 1.0), 15000, 1.0), 15000, 1.0) * 0.5,
 	1425, 0.5, 19.25
 );
 
@@ -362,21 +362,21 @@ decR = BHiShelf.ar(
 bfpScaleL = Latch.ar(Delay1.ar(Peak.ar(decL, blockTrigL)), blockTrigL).max(0.002);
 bfpScaleR = Latch.ar(Delay1.ar(Peak.ar(decR, blockTrigR)), blockTrigR).max(0.002);
 
-// Paso 4+5: TPDF dither + cuantización BFP + de-énfasis J.17 inversa (BHiShelf) — todo a 48kHz
-		dpcmReconL = BHiShelf.ar(
+// Paso 4+5: TPDF dither + cuantización BFP + de-énfasis J.17 inversa (BHiShelf) + reconstrucción — todo a 48kHz
+		dpcmReconL = BLowPass4.ar(BHiShelf.ar(
 			(((decL / bfpScaleL).clip(-1,1)
 				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsL.round.clip(2,16)-1))))
 			) * (2**(nicamBitsL.round.clip(2,16)-1))).round
 				/ (2**(nicamBitsL.round.clip(2,16)-1)) * bfpScaleL,
-			1383, 0.5, -18.25
-		) * 2.0;
-		dpcmReconR = BHiShelf.ar(
+			1389, 0.5, -18.25
+		) * 2.0, 15000, 1.0) * 0.7;
+		dpcmReconR = BLowPass4.ar(BHiShelf.ar(
 			(((decR / bfpScaleR).clip(-1,1)
 				+ ((WhiteNoise.ar + WhiteNoise.ar) * (1 / (2 ** (nicamBitsR.round.clip(2,16)-1))))
 			) * (2**(nicamBitsR.round.clip(2,16)-1))).round
 				/ (2**(nicamBitsR.round.clip(2,16)-1)) * bfpScaleR,
-			1425, 0.5, -19.25
-		) * 2.0;
+			1419, 0.5, -19.25
+		) * 2.0, 15000, 1.0) * 0.7;
 
 			// Select quantization: 8-bit linear, μ-law, o NICAM
 			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
