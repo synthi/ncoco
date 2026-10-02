@@ -102,15 +102,31 @@ function Storage.load(G, SC, pset_number)
       G.active_snapshot = data.active_snapshot or 0
       
       -- Load Sequencer Data (But don't start yet)
+      -- [v3.00] MUTAR EN SITIO, no reemplazar la tabla.
+      -- run_sequencer() hizo `local s = G.sequencers[id]` al arrancar y guarda
+      -- esa referencia para siempre. Si aqui se hacia `G.sequencers = data.sequencers`,
+      -- la corrutina seguia leyendo la tabla VIEJA mientras GridNav.key grababa
+      -- en la NUEVA: la grabacion funcionaba pero la reproduccion leia datos
+      -- rancios -> "grabar y que suene vacio". Copiando campo a campo, toda
+      -- referencia viva sigue apuntando a la misma tabla.
       if data.sequencers then
-         G.sequencers = data.sequencers
-         for i=1,4 do 
-            G.sequencers[i].double_click_timer = nil 
-            -- CORRECCIÓN: Solo poner estado 3 si hay datos grabados
-            if G.sequencers[i].data and #G.sequencers[i].data > 0 then
-                G.sequencers[i].state = 3 -- Stopped (Ready)
-            else
-                G.sequencers[i].state = 0 -- Empty
+         for i=1,4 do
+            local src = data.sequencers[i]
+            local dst = G.sequencers[i]
+            if src and dst then
+               dst.data = src.data or {}
+               dst.duration = src.duration or 0
+               dst.step = src.step
+               dst.playhead = 0
+               dst.last_cpu_time = util.time()
+               dst.start_time = util.time()
+               dst.double_click_timer = nil
+               -- Solo poner estado 3 si hay datos grabados
+               if dst.data and #dst.data > 0 then
+                  dst.state = 3 -- Stopped (Ready)
+               else
+                  dst.state = 0 -- Empty
+               end
             end
          end
       end

@@ -684,50 +684,70 @@ es geometría del dibujo. Preexistente, no introducido en v3.00.
 
 ---
 
-## 17. Congelado del grid (v3.00) — causa encontrada
+## 17. Congelado del grid (v3.00) — REVISION HONESTA
 
 **Síntoma:** la rejilla se queda fija con el brillo del último valor recibido
-(o al máximo), los LFOs no se mueven, pero **sigue respondiendo a las
-pulsaciones**. Ocurre de repente, a veces sin tocar nada. Es un desastre en vivo.
+(al máximo), los LFOs no se mueven, pero **sigue respondiendo a las
+pulsaciones**. Ocurre de repente, a veces sin tocar nada.
 
-### Por qué no pasaba nadie
+### Lo que NO está demostrado
 
-Cuatro intentos anteriores lo "arreglaron" con `pcall` y guardias `nil`
-(`7956c34`, `cc4505a`, `fa09d05`). **Todos asumían que fallaba el código de
-Lua.** No fallaba nunca: el `pcall` no branaba porque no había error.
+La hipótesis de que "el OSC se para y los valores se congelan" se ha
+**rebajado**. Encaja con el síntoma, pero **no hay prueba**: nunca se ha
+reproducido a voluntad. Cuatro intentos anteriores fallaron; este quinto añade
+detección, no una certeza.
 
-### La causa real
+**Corrección importante al párrafo anterior de este documento**: se afirmaba
+que el `pcall` "no disparó nunca porque no había error". Eso es una suposición,
+no un hecho medido. Lo único verificable es que **el código no cambió el
+comportamiento** de los intentos previos, y eso no prueba dónde está la causa.
 
-Los valores de la rejilla llegan por OSC desde SuperCollider (`/update`, vía
-`SendReply.kr`). Si ese hilo deja de mandar —SC se cuelga, el motor se cae,
-se pierde la conexión— `G.sources_val` conserva el último valor recibido.
+### Lo que SÍ es verificable (leído del código oficial de norns)
 
-El redraw es **diferencial** (`if cache ~= b then g:led()`), así que si el
-valor no cambia, **nunca se envía nada**. La rejilla se queda clavada en el
-último estado. Y como las pulsaciones siguen por otro camino
-(`GridNav.key` → `g:led` directo), el grid "responde" mientras está muerto.
+Del código C de monome (norns `matron/src/device/device_monome.cc`,
+`lua/core/grid.lua`, `lua/core/vport.lua`):
 
-**Faltaba detectar la ausencia de datos.** Un `pcall` detecta "el código
-falla"; ninguno detecta "el código funciona pero ya no le llega nada".
+1. **`grid.connect()` devuelve un "vport", no el dispositivo.** Sus métodos
+   `led`/`all`/`refresh` se envuelven así:
+   ```lua
+   if self.device then self.device[method](self.device, ...) end
+   ```
+   **Si `g.device` es `nil`, esas llamadas son no-ops SILENCIOSOS**: no dan
+   error. Este es un candidato tan válido como el OSC, y hasta ahora no se
+   vigilaba. Un `g.device` nil congela los LEDs exactamente igual.
 
-### Lo que se hizo
+2. **`g:refresh()` solo envía los quads marcados "dirty"** (`dev_monome_refresh`
+   recorre `md->dirty[]`). Llamarlo de más no gasta ancho de banda.
 
-1. **Watchdog** (`ncoco.lua`): el OSC marca `G.last_osc_time`. El metro comprueba
-   el retraso; a 1.5 s avisa (`OSC STALLED`), a 3 s fuerza reinicio de LEDs
-   (`OSC DEAD`). Queda en pantalla por qué pasó.
-2. **`snap_timers` ya no es un flag** sino un timestamp (`grid_nav.lua`). Antes lo
-   apagaba una corrutina `clock.run`; si esa corrutina moría, ese botón se
-   quedaba en brillo 15 **para siempre** y `reset_cache` no lo limpia. Ahora
-   expira por tiempo: ningún estado puede colgarse.
-3. **`ui.lua:89`** leía `G.sources_val[7]` sin protección, a diferencia del resto
-   del código. Un `nil` tumba el redraw de pantalla.
+3. **`g:led()` marca el quad como dirty y actualiza el buffer del C.**
 
-**Lección general:** un `pcall` no protege contra la pérdida de datos. Si el
-sistema depende de un flujo externo, hay que vigilar el flujo, no solo el código.
+### Lo que sí se corrigió (verificado)
+
+1. **`refresh()` ahora se llama siempre**, no solo `if changed`. Antes, un error
+   a mitad del bucle podía dejar quads marcados dirty sin que ninguna pasada
+   posterior los reenviara (porque el cache Lua ya creía haberlos pintado).
+   Esto es un fallo real de desincronización, independiente del OSC.
+2. **`snap_timers` expira por tiempo.** Un botón de snapshot se quedaba en 15
+   para siempre si moría su corrutina; `reset_cache` no lo limpiaba.
+3. **`ui.lua:89`** leía `G.sources_val[7]` sin el `or 0` que usa el resto.
+4. **Detectores** (no parches): el OSC marca su llegada (`G.last_osc_time`); si
+   se para >1.5 s, se registra. Un latido (`clock.run` aparte) comprueba que el
+   metro del grid sigue disparando y que `g.device` no es nil. **Ninguno borra
+   la rejilla**: un falso positivo sería peor que el fallo.
+
+### Por qué NO se actúa automáticamente
+
+La versión anterior de este arreglo **borraba la rejilla** (`g:all(0)`) ante un
+OSC parado. Es peligroso: si el detector se equivoca, provoca exactamente el
+apagón que intenta evitar. Se retiró. Ahora todo es registro, para que el
+próximo fallo en directo **deje rastro** en vez de ser un misterio.
+
+**Lección:** la función de un diagnóstico no es adivinar la causa, es hacer que
+el fallo sea observable. Eso es lo que faltó en los cuatro intentos previos.
 
 ### Ojo: esto no arregla el fallo del secuenciador
 
-Son dos cosas distintas. Este diagnóstico es del congelado del grid.
+Son dos cosas distintas.
 
 ---
 

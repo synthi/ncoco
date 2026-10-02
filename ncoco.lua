@@ -388,26 +388,42 @@ function init()
           grid_error_count = 0
        end
 
-       -- Sin datos nuevos durante 1.5s => el stream OSC esta muerto.
-       -- A los 45 frames (3s) se fuerza el reinicio completo de los LEDs.
+       -- [v3.00] Detector de OSC parado. NO actua: solo deja constancia.
+       -- La hipotesis (el /update deja de llegar y los valores se congelan)
+       -- NO esta demostrada, asi que no se fuerza ningun cambio de LEDs:
+       -- borrar la rejilla ante un falso positivo seria peor que el fallo.
        if G.last_osc_time > 0 then
           local stale = util.time() - G.last_osc_time
-          if stale > 1.5 then
-             grid_stale_count = grid_stale_count + 1
-             if grid_stale_count == 1 then
-                print("OSC STALLED: no /update desde hace " .. string.format("%.1f", stale) .. "s (valores congelados)")
-             elseif grid_stale_count >= 45 then
-                print("OSC DEAD: reiniciando LEDs por falta de datos")
-                g:all(0); g:refresh()
-                GridNav.reset_cache()
-                grid_stale_count = 0
-             end
-          else
-             grid_stale_count = 0
+          if stale > 1.5 and grid_stale_count == 0 then
+             print("OSC STALLED: no /update desde hace " .. string.format("%.1f", stale) .. "s")
           end
+          if stale > 1.5 then grid_stale_count = grid_stale_count + 1
+          else grid_stale_count = 0 end
        end
     end
     grid_metro:start()
+
+    -- [v3.00] LATIDO / HEARTBEAT (detector, no parche a ciegas)
+    -- Un metro de norns NO propaga su error al script: norns lo imprime y sigue.
+    -- Lo que NO se detectaba hasta ahora es que el metro dejase de disparar, o
+    -- que g.device quedase nil (en cuyo caso g:led/g:refresh son no-ops
+    -- SILENCIOSOS: grid.connect() devuelve un vport, no el dispositivo).
+    -- Este latido es un clock.run aparte: si el metro muere, este sigue vivo.
+    -- NO reinicia el metro (evita fugas de IDs: solo hay 30) ni borra la
+    -- rejilla (seria un parpadeo peor que el fallo). Solo deja constancia.
+    clock.run(function()
+       while true do
+          clock.sleep(2.0)
+          local last = GridNav.last_redraw or 0
+          if last > 0 and (util.time() - last) > 3.0 then
+             print("GRID HEARTBEAT: sin redraw desde hace " ..
+                   string.format("%.1f", util.time() - last) .. "s (metros ok?)")
+          end
+          if not g.device then
+             print("GRID HEARTBEAT: g.device = nil -- los LEDs no llegan al hardware")
+          end
+       end
+    end)
     
     -- [FIX] Grid Auto-Heal callback
     grid.add = function()

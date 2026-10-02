@@ -1,4 +1,12 @@
 -- lib/grid_nav.lua v2.05
+-- v3.00 FASE 4 (congelado del grid):
+-- 1. refresh() se llama SIEMPRE, no solo `if changed`. Un error a mitad del
+--    bucle podia dejar quads dirty sin que nadie los reenviara (ver el
+--    comentario en el propio redraw). refresh() no gasta mas: el C solo manda
+--    los quads con la flag dirty.
+-- 2. snap_timers es un TIMESTAMP, no un flag: expira solo aunque su corrutina
+--    muera. Antes un boton podia quedarse en brillo 15 para siempre.
+-- 3. GridNav.last_redraw alimenta el latido de ncoco.
 -- CLEANUP v3.00 FASE 1 (no functional change):
 -- 1. REMOVED GridNav.is_dirty (written 5x, never read; see note at the field).
 -- 2. Grid debounce key is now numeric (x-1)*8+y instead of a "x,y" string.
@@ -36,7 +44,10 @@ GridNav.snap_timers = {}
 -- was intentionally disabled (see CHANGELOG v10001) to allow fluid animation —
 -- the sequencer/REC blink uses math.sin(util.time()), which changes every frame
 -- with no user input. Re-adding the gate would freeze those LEDs.
+-- [v3.00] Marca de tiempo del ultimo redraw completado. La usa el latido
+-- (heartbeat) de ncoco para detectar si el metro del grid dejo de disparar.
 GridNav.refresh_counter = 0
+GridNav.last_redraw = 0
 
 function GridNav.init_map(G)
   G.grid_map = {}
@@ -304,7 +315,6 @@ function GridNav.redraw(G, g)
      GridNav.refresh_counter = 0
   end
 
-  local changed = false
   for x=1,16 do for y=1,8 do
     local obj=G.grid_map[x][y]; local b=0
     
@@ -405,10 +415,20 @@ function GridNav.redraw(G, g)
     if GridNav.cache[x][y] ~= b then 
        g:led(x,y,b)
        GridNav.cache[x][y] = b 
-       changed = true
     end
   end end
-  -- Only refresh grid if at least one LED was updated
-  if changed then g:refresh() end
+  -- [v3.00] refresh() se llama SIEMPRE, no solo si cambió algo.
+  -- Antes: "if changed then g:refresh() end". Riesgo real: si un error a mitad
+  -- del bucle abortaba el redraw, los g:led ya emitidos dejaban su quad DIRTY
+  -- en el C, pero el refresh que los enviaba no llegaba a llamarse; y como el
+  -- cache ya se había actualizado, ninguna pasada posterior los reenviaba.
+  -- (Los cuadros sucios quedaban varados sin que nadie los vaciara.)
+  -- refresh() cuesta lo mismo con la lista limpia: el C solo manda los quads
+  -- cuya flag dirty está puesta. Llamarlo siempre no gasta ancho de banda y
+  -- garantiza que ningún cuadro quede pendiente.
+  g:refresh()
+  -- Latido: constancia de que este ciclo llego al final. El heartbeat
+  -- de ncoco vigila este valor para detectar que el metro murio.
+  GridNav.last_redraw = util.time()
 end
 return GridNav
