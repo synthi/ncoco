@@ -323,6 +323,8 @@ function init()
       
       G.sources_val[11] = (args[23] or 0)
       G.sources_val[12] = (args[24] or 0)
+      -- [v3.00] El watchdog del grid necesita saber cuando llego el ultimo dato.
+      G.last_osc_time = util.time()
       
     elseif path == '/buffer_info' then
       local dur = args[2]
@@ -362,6 +364,15 @@ function init()
 
     grid_metro = metro.init(); grid_metro.time = 1/15
     local grid_error_count = 0
+    -- [v3.00] WATCHDOG: el congelado del grid NO era un error de Lua, era que
+    -- los valores dejaba de llegar. /update viene de SuperCollider via OSC; si
+    -- ese hilo muere (SC se cuelga, el motor se cae), sources_val se queda con
+    -- el ultimo valor recibido --tipicamente 1.0 => brillo maximo-- y como el
+    -- redraw es diferencial, nunca se detecta cambio: la rejilla se queda fija
+    -- pero SIGUE respondiendo a las pulsaciones. Eso es exactamente el sintoma.
+    -- Detectar "no llegan datos" es lo que faltaba; el pcall de abajo solo
+    -- detecta "el codigo de Lua falla", que es otro problema.
+    local grid_stale_count = 0
     grid_metro.event = function()
        local ok, err = pcall(GridNav.redraw, G, g)
        if not ok then
@@ -375,6 +386,25 @@ function init()
           end
        else
           grid_error_count = 0
+       end
+
+       -- Sin datos nuevos durante 1.5s => el stream OSC esta muerto.
+       -- A los 45 frames (3s) se fuerza el reinicio completo de los LEDs.
+       if G.last_osc_time > 0 then
+          local stale = util.time() - G.last_osc_time
+          if stale > 1.5 then
+             grid_stale_count = grid_stale_count + 1
+             if grid_stale_count == 1 then
+                print("OSC STALLED: no /update desde hace " .. string.format("%.1f", stale) .. "s (valores congelados)")
+             elseif grid_stale_count >= 45 then
+                print("OSC DEAD: reiniciando LEDs por falta de datos")
+                g:all(0); g:refresh()
+                GridNav.reset_cache()
+                grid_stale_count = 0
+             end
+          else
+             grid_stale_count = 0
+          end
        end
     end
     grid_metro:start()

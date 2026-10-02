@@ -86,7 +86,7 @@ function UI.draw_popup(G)
 end
 
 function UI.draw_main(G)
-  if (G.sources_val[7] > 0.95) or (G.sources_val[8] > 0.95) then screen.level(15); screen.rect(0,0,128,64); screen.stroke() end
+  if ((G.sources_val[7] or 0) > 0.95) or ((G.sources_val[8] or 0) > 0.95) then screen.level(15); screen.rect(0,0,128,64); screen.stroke() end
 
   if G.focus.source then
     if G.focus.last_dest then UI.draw_patch_menu(G); return end

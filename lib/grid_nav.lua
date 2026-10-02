@@ -310,7 +310,14 @@ function GridNav.redraw(G, g)
     
     if obj then
       if obj.t=='snap' then
-         if GridNav.snap_timers[obj.id] and GridNav.snap_timers[obj.id] > 0 then b = 15
+         -- [v3.00] snap_timers[id] guarda un TIMESTAMP (util.time()), no un flag.
+         -- Antes se comprobaba "> 0", es decir "hay un flash en curso", y solo lo
+         -- apagaba la corrutina de clock.run. Si esa corrutina moria, el flag se
+         -- quedaba en positivo para siempre y ese boton quedaba en brillo 15
+         -- permanentemente -- reset_cache NO lo limpia, porque no es el cache.
+         -- Comparando contra el tiempo, expira solo: ningun estado puede colgar.
+         local flash = GridNav.snap_timers[obj.id]
+         if flash and flash > 0 and (util.time() - flash) < 1.6 then b = 15
          elseif G.active_snapshot == obj.id then b = 10
          elseif G.snapshots[obj.id] ~= nil then b = 6
          else b = 2 end

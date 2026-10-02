@@ -684,4 +684,53 @@ es geometría del dibujo. Preexistente, no introducido en v3.00.
 
 ---
 
+## 17. Congelado del grid (v3.00) — causa encontrada
+
+**Síntoma:** la rejilla se queda fija con el brillo del último valor recibido
+(o al máximo), los LFOs no se mueven, pero **sigue respondiendo a las
+pulsaciones**. Ocurre de repente, a veces sin tocar nada. Es un desastre en vivo.
+
+### Por qué no pasaba nadie
+
+Cuatro intentos anteriores lo "arreglaron" con `pcall` y guardias `nil`
+(`7956c34`, `cc4505a`, `fa09d05`). **Todos asumían que fallaba el código de
+Lua.** No fallaba nunca: el `pcall` no branaba porque no había error.
+
+### La causa real
+
+Los valores de la rejilla llegan por OSC desde SuperCollider (`/update`, vía
+`SendReply.kr`). Si ese hilo deja de mandar —SC se cuelga, el motor se cae,
+se pierde la conexión— `G.sources_val` conserva el último valor recibido.
+
+El redraw es **diferencial** (`if cache ~= b then g:led()`), así que si el
+valor no cambia, **nunca se envía nada**. La rejilla se queda clavada en el
+último estado. Y como las pulsaciones siguen por otro camino
+(`GridNav.key` → `g:led` directo), el grid "responde" mientras está muerto.
+
+**Faltaba detectar la ausencia de datos.** Un `pcall` detecta "el código
+falla"; ninguno detecta "el código funciona pero ya no le llega nada".
+
+### Lo que se hizo
+
+1. **Watchdog** (`ncoco.lua`): el OSC marca `G.last_osc_time`. El metro comprueba
+   el retraso; a 1.5 s avisa (`OSC STALLED`), a 3 s fuerza reinicio de LEDs
+   (`OSC DEAD`). Queda en pantalla por qué pasó.
+2. **`snap_timers` ya no es un flag** sino un timestamp (`grid_nav.lua`). Antes lo
+   apagaba una corrutina `clock.run`; si esa corrutina moría, ese botón se
+   quedaba en brillo 15 **para siempre** y `reset_cache` no lo limpia. Ahora
+   expira por tiempo: ningún estado puede colgarse.
+3. **`ui.lua:89`** leía `G.sources_val[7]` sin protección, a diferencia del resto
+   del código. Un `nil` tumba el redraw de pantalla.
+
+**Lección general:** un `pcall` no protege contra la pérdida de datos. Si el
+sistema depende de un flujo externo, hay que vigilar el flujo, no solo el código.
+
+### Ojo: esto no arregla el fallo del secuenciador
+
+Son dos cosas distintas. Este diagnóstico es del congelado del grid.
+
+---
+
+---
+
 ---

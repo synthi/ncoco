@@ -60,7 +60,11 @@ M.trail_head = {1, 1}
 M.SCOPE_LEN = 128
 M.scope_history = {}
 -- INCREASED TO 12
-M.sources_val = {0,0,0,0,0,0,0,0,0,0,0,0} 
+M.sources_val = {0,0,0,0,0,0,0,0,0,0,0,0}
+-- [v3.00] Marca de tiempo del ultimo /update recibido de SuperCollider.
+-- Sirve para el watchdog del grid: si el OSC deja de llegar, los valores se
+-- congelan y la rejilla muestra lo ultimo recibido (tipicamente al maximo).
+M.last_osc_time = 0 
 for i=1, 12 do 
   M.scope_history[i] = {}
   for j=1, M.SCOPE_LEN do M.scope_history[i][j] = 0 end
