@@ -125,14 +125,25 @@ end
 -- Comprobacion sobre el DIBUJO real de la pantalla
 --
 -- Desde el punto #12 de la Fase 3 el scope se dibuja como LINEA continua
--- (1 pixel inicial + 107 segmentos + 1 stroke), igual que los inspectores de
+-- (1 pixel inicial + N segmentos + 1 stroke), igual que los inspectores de
 -- fuentes. Antes eran 108 pixeles sueltos, cada uno con su propio relleno.
 --
--- Por eso aqui ya no se cuentan pixeles del scope, sino segmentos:
---   - destinos 5, 6, 7, 12, 13, 14: 28 pixeles de umbral + 107 segmentos
---   - el resto: 1 pixel inicial + 107 segmentos
+-- Las expectativas se DERIVAN de las constantes reales de lib/ui.lua
+-- (BOX_X/BOX_Y/BOX_W/BOX_H), no se escriben a mano: si la caja cambia de
+-- tamano, este test se recalcula solo y no queda "caducado".
 --------------------------------------------------------------------
 section('dibujo real en pantalla (lib/ui.lua tal cual esta)')
+
+local ui_src = io.open('lib/ui.lua'):read('*a')
+local BX, BW = ui_src:match('BOX_X, BOX_Y, BOX_W, BOX_H = (%d+), %d+, (%d+), %d+')
+check('se han podido leer BOX_X y BOX_W de lib/ui.lua', BX ~= nil)
+BX, BW = tonumber(BX), tonumber(BW)
+-- linea de umbral: for tx = BX+1, BX+BW-1, 4  ->  n de puntos
+local UMBRAL   = math.floor((BW - 2) / 4) + 1
+-- onda: w = BW - 1 puntos; el 1o es un pixel y el resto segmentos
+local PTS_OND  = BW - 1
+local PIX_UMBRAL = UMBRAL + 1     -- umbral + 1er punto de la onda
+local SEG_OND    = PTS_OND - 1    -- segmentos = puntos - 1
 
 local function medir(id)
   H.reset()
@@ -143,15 +154,15 @@ end
 -- El codigo dibuja la linea de umbral para los destinos
 -- 5, 6, 7, 12, 13 y 14. El resto no.
 local p5, l5 = medir(5)
-eq('destino 5: 29 pixeles de umbral + 1 inicial de la onda', p5, 30)
-eq('destino 5: 114 segmentos de onda', l5, 114)
+eq(string.format('destino 5: %d de umbral + 1 inicial (derivado de la caja)', UMBRAL), p5, PIX_UMBRAL)
+eq(string.format('destino 5: %d segmentos de onda (derivado de la caja)', SEG_OND), l5, SEG_OND)
 
 local p6 = medir(6)
-eq('destino 6: tambien lleva umbral', p6, 30)
+eq('destino 6: tambien lleva umbral', p6, PIX_UMBRAL)
 
 local p9, l9, f9, s9 = medir(9)
 eq('destino 9: sin umbral, 1 pixel inicial', p9, 1)
-eq('destino 9: 114 segmentos de onda', l9, 114)
+eq(string.format('destino 9: %d segmentos de onda (derivado de la caja)', SEG_OND), l9, SEG_OND)
 eq('destino 9: un solo relleno (el fondo)', f9, 1)
 eq('destino 9: 2 trazos (caja y onda)', s9, 2)
 
