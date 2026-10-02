@@ -1,6 +1,7 @@
 -- ncoco.lua v2.14
 -- CLEANUP v3.00 FASE 1 (no functional change):
--- 1. REMOVED is_bipolar_param() and the 2nd arg of _16n.normalize() (unused).
+-- 1. REVERTED: is_bipolar_param() + 2nd arg of normalize() restored (breaking
+--    the 16n when normalize() came back to its 2-arg signature).
 -- 2. /update: args[23]/[24] nil-guards use the same `or 0` style as the rest.
 -- CHANGELOG v2.14:
 -- 1. FIX: NICAM — 2× BLowPass4 anti-aliasing + 2× reconstrucción + TPDF dither.
@@ -179,6 +180,11 @@ function G.snap_clear(id)
 end
 
 -- --- HELPERS FOR 16n ---
+local function is_bipolar_param(p_name)
+   return p_name == "filtL" or p_name == "filtR" or
+          p_name == "speed_offsetL" or p_name == "speed_offsetR" or
+          p_name == "pan_l" or p_name == "pan_r"
+end
 local function apply_glue(val_norm, param_id)
    if param_id == "speed_offsetL" or param_id == "speed_offsetR" or 
       param_id == "filtL" or param_id == "filtR" or 
@@ -389,7 +395,7 @@ function init()
                 local p_obj = params:lookup_param(p_name)
                 if not p_obj then return end
 
-                local val_calibrated = _16n.normalize(msg.val)
+                local val_calibrated = _16n.normalize(msg.val, is_bipolar_param(p_name))
                 local val_glued = apply_glue(val_calibrated, p_name)
                 
                 local current_norm = params:get_raw(p_name)
