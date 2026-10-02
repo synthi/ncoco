@@ -4,12 +4,14 @@
 --    del archivo. Un nil tumbaba el redraw de pantalla entero.
 -- 2. FIX: inspector de DESTINOS, destino SKIP (6/13). El codigo dibujaba
 --    "K2/3: MODE" en la fila y=62, que en ese mismo destino ya esta ocupada por
---    "E1:CHS"/"E2:RATE": los textos se SUPERPONIAN. Arreglo: la caja del scope
---    SUBE 5 px (y=15 -> y=10) y la pista vuelve a su fila propia (y=55), como en
---    el diseno original (pre-v3.00). Alturas medidas con la fuente real de norns
---    (resources/norns.ttf, cairo size 8.0 -> 5 px sobre la linea base), ver
---    tools/verify_p12_textfit.lua: titulo y=6 ocupa 1..6 | caja 10..50 |
---    pista y=55 ocupa 50..55 | controles y=62 ocupan 57..62. Sin solapes.
+--    "E1:CHS"/"E2:RATE": los textos se SUPERPONIAN. Arreglo final: se ELIMINA la
+--    pista "K2/3: MODE" de este inspector (a y=55 seguia tocando el borde de la
+--    caja, que acaba en y=50). La caja del scope SUBE 5 px (y=15 -> y=10).
+--    Alturas medidas con la fuente real de norns (resources/norns.ttf, cairo
+--    size 8.0 -> 5 px sobre la linea base), ver tools/verify_p12_textfit.lua:
+--    titulo y=6 ocupa 1..6 | caja 10..50 | controles y=62 ocupan 57..62.
+--    (El inspector de COCO conserva su "K2/3: MODE" en y=55: alli la caja acaba
+--    en y=45 y no lo toca.)
 -- 3. CLEAN: el ancho de la onda (antes el 119 a mano) se deriva de BOX_W-1.
 -- FIX v3.00:
 -- 1. B7: BIT_NAMES[4] "μ-law" -> "u-law". The norns builtin 6x13 font has NO glyph
@@ -138,13 +140,11 @@ end
 
 function UI.draw_dest_inspector(G, id)
   local title = DST_NAMES[id] or "DEST"
-  local sub = ""
-  
+
   if id == 6 or id == 13 then
      local side = (id==6) and "L" or "R"
      local mode = params:get("skip_mode"..side)
      title = "SKIP "..(side=="L" and "1" or "2")..": "..(mode==1 and "SINGLE" or "AUTO")
-     sub = "K2/3: MODE"
   end
 
   -- v3.00 Fase 3: caja del scope ampliada y cabecera compacta en UNA fila.
@@ -155,21 +155,14 @@ function UI.draw_dest_inspector(G, id)
   -- redundante con el control ya visible en la cabecera.
   -- Caja: de 108x25 a 120x40, area x1.78. El cero sigue en el CENTRO, que es
   -- lo correcto porque la modulacion puede ir a mas o a menos.
-  -- v3.01: la caja sube 5 px (y=15 -> y=10) para devolver a la pista de SKIP su
-  -- fila propia (y=55) sin chocar ni con la caja ni con la fila de abajo (y=62).
+  -- v3.01: la caja sube 5 px (y=15 -> y=10) al eliminar la pista "K2/3: MODE"
+  -- de este inspector, que ya no ocupa la fila de abajo (y=62).
   -- Comprobado con la fuente real (norns.ttf@8: 5 px de alto sobre la base):
-  -- titulo y=6 -> 1..6 | caja 10..50 | pista y=55 -> 50..55 | controles y=62 -> 57..62.
+  -- titulo y=6 -> 1..6 | caja 10..50 | controles y=62 -> 57..62. Sin solapes.
   local BOX_X, BOX_Y, BOX_W, BOX_H = 4, 10, 120, 40
 
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
   screen.move(3, 6); screen.text(title)
-
-  -- Pista de botones de SKIP (solo destinos 6/13), en su PROPIA fila (y=55),
-  -- como en el diseno original. Antes de v3.01 se dibujaba en la fila de abajo
-  -- (y=62) y se superponia con "E1:CHS"/"E2:RATE", que son de ese mismo destino.
-  if sub ~= "" then
-     screen.level(4); screen.move(2, 55); screen.text(sub)
-  end
 
   -- cabecera en UNA sola fila: titulo izquierda, "E3 GAIN IN: valor" derecha
   -- etiqueta a nivel 6 (antes 3, se perdia contra el fondo) y valor a nivel 12

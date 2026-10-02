@@ -185,10 +185,20 @@ function GridNav.key(G, g, x, y, z, simulated)
      end
      
      if z == 1 then
-        GridNav.snap_timers[obj.id] = util.time()
+        -- [v3.01] La corrutina lleva capturado SU PROPIO sello de tiempo.
+        -- ANTES comparaba "snap_timers[id] ~= 0": eso es un valor COMPARTIDO por
+        -- todos los toques. Al despertar, la corrutina de un toque VIEJO veia el
+        -- sello de un toque NUEVO (distinto de 0) y BORRABA el snapshot aunque
+        -- ese toque nuevo fuera corto. Con toques muy seguidos eso pasaba antes o
+        -- despues -> "de pronto dice cleared" sin que nadie mantuviera pulsado.
+        -- Ahora solo actua si el sello sigue siendo EXACTAMENTE el suyo: si hubo
+        -- release (pasa a 0) o un toque nuevo (sello distinto), deja de coincidir.
+        -- Mantener >1.6s sigue borrando igual.
+        local pressed_at = util.time()
+        GridNav.snap_timers[obj.id] = pressed_at
         clock.run(function()
            clock.sleep(1.6) 
-           if GridNav.snap_timers[obj.id] ~= 0 then
+           if GridNav.snap_timers[obj.id] == pressed_at then
               G.snap_clear(obj.id)
               GridNav.snap_timers[obj.id] = -1 
                          end
@@ -196,7 +206,7 @@ function GridNav.key(G, g, x, y, z, simulated)
      elseif z == 0 then
         if GridNav.snap_timers[obj.id] == -1 then
            GridNav.snap_timers[obj.id] = 0
-        else
+        elseif GridNav.snap_timers[obj.id] then   -- nil = release sin press: no hacer nada
            local t = util.time() - GridNav.snap_timers[obj.id]
            GridNav.snap_timers[obj.id] = 0
            if t < 1.6 then

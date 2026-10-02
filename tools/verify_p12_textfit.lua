@@ -135,22 +135,15 @@ for id = 1, DEST do
 end
 eq('textos fuera de pantalla', fuera, 0)
 
-section('SKIP: la pista vuelve a su fila propia (y=55)')
+section('SKIP: ya NO dibuja la pista "K2/3: MODE" (el autor la elimino)')
 for _, id in ipairs{6, 13} do
   local ts = textos(id)
-  local pista, en_62, en_cabecera, controles_62 = nil, false, false, false
+  local pista, controles_62 = false, false
   for _, t in ipairs(ts) do
-    if t.txt == 'K2/3: MODE' then
-      pista = t
-      if t.row == 62 then en_62 = true end
-      if t.row == 6  then en_cabecera = true end
-    end
+    if t.txt == 'K2/3: MODE' then pista = true end
     if t.row == 62 and (t.txt == 'E1:CHS' or t.txt == 'E2:RATE') then controles_62 = true end
   end
-  check(string.format('id %d: existe la pista "K2/3: MODE"', id), pista ~= nil)
-  check(string.format('id %d: la pista esta en y=55', id), pista and pista.row == 55)
-  check(string.format('id %d: la pista NO esta en y=62', id), not en_62)
-  check(string.format('id %d: la pista NO esta en la cabecera', id), not en_cabecera)
+  check(string.format('id %d: NO aparece "K2/3: MODE"', id), not pista)
   check(string.format('id %d: los controles E1/E2 siguen en y=62', id), controles_62)
 end
 
