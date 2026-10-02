@@ -562,6 +562,30 @@ end
 No es elegante, pero es infinitamente más robusto que intentar detectar la
 desincronización. Coste: 128 escrituras cada 5 s. Irrelevante.
 
+### 6.6 Recuperación en caliente (lo que hace un reinicio, sin reiniciar)
+
+Un reinicio de script, en lo que a la rejilla toca, ejecuta `Script.clear()`
+(`lua/core/script.lua`) → `grid.cleanup()` (por dispositivo: `dev:all(0)` +
+`dev:refresh()`) y `metro.free_all()`. Eso **se puede hacer en vivo**:
+
+```lua
+local port = GridNav.find_device_port()      -- escanea Grid.vports[1..4].device
+if port and g ~= grid.connect(port) then g = grid.connect(port) end
+if g.device then g:all(0); g:refresh() end   -- reenvío forzado: all() marca dirty todo
+GridNav.reset_cache()
+grid_metro:stop(); grid_metro:start()        -- start() REUSA el id: sin fuga
+```
+
+- `grid.connect(n)` devuelve `Grid.vports[n]`; su campo `.device` lo rellena
+  `Grid.update_devices()`. **Hay que ESCANEAR los 4 vports**: si el aparato
+  reengancha con otro nombre queda en otro vport y el 1 se queda sin `.device`
+  (y entonces `g:led`/`g:refresh` son **no-ops silenciosos**, `vport.lua`).
+- `g:all(val)` marca dirty en TODOS los quads **sin comparar el valor**
+  (`device_monome.cc`), así que fuerza un reenvío que el cache diferencial de Lua
+  no puede bloquear.
+- Ncoco expone `>> recover_grid()` a maiden para el congelado que **no** se puede
+  detectar desde Lua (capa serial/USB de monome).
+
 ---
 
 ## 7. `midi`

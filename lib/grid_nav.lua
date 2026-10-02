@@ -1,5 +1,10 @@
 -- lib/grid_nav.lua v3.01
 -- v3.01 (continúa la FASE 4 del congelado del grid):
+-- 0. FIX: el clock.run del jack (0.8s) hacia G.patch[G.focus.source][obj.id]
+--    al despertar. Si G.focus.source se volvia nil entre medias (soltar la
+--    fuente, cargar un snapshot), era G.patch[nil] -> "table index is nil"
+--    DENTRO de una corrutina de clock. Ahora captura la fuente al crear el
+--    cierre y comprueba antes de indexar.
 -- 1. refresh() se llama SIEMPRE, no solo `if changed`. Un error a mitad del
 --    bucle podia dejar quads dirty sin que nadie los reenviara (ver el
 --    comentario en el propio redraw). refresh() no gasta mas: el C solo manda
@@ -7,6 +12,9 @@
 -- 2. snap_timers es un TIMESTAMP, no un flag: expira solo aunque su corrutina
 --    muera. Antes un boton podia quedarse en brillo 15 para siempre.
 -- 3. GridNav.last_redraw alimenta el latido de ncoco.
+-- 4. NEW: GridNav.find_device_port() — devuelve el vport que SI tiene aparato.
+--    Lo usa la recuperacion del latido y grid.add para reenganchar la rejilla
+--    cuando g.device queda nil (verificado contra norns grid.lua/vport.lua).
 -- CLEANUP v3.00 FASE 1 (no functional change):
 -- 1. REMOVED GridNav.is_dirty (written 5x, never read; see note at the field).
 -- 2. Grid debounce key is now numeric (x-1)*8+y instead of a "x,y" string.
@@ -93,6 +101,29 @@ function GridNav.reset_cache()
         GridNav.cache[x][y] = -1 
      end 
   end
+end
+
+-- [v3.01] Devuelve el indice del vport (1..4) que SI tiene un dispositivo
+-- fisico enganchado, o nil si ninguno. Sirve para RECUPERAR la rejilla cuando
+-- g.device queda nil.
+-- VERIFICADO en norns lua/core/grid.lua + lua/core/vport.lua (no es una
+-- suposicion):
+--   - grid.connect(n) NO devuelve el aparato, devuelve Grid.vports[n], una tabla
+--     cuyo campo .device la rellena Grid.update_devices() al conectar y la pone
+--     a nil al desconectar.
+--   - vport.wrap_method envuelve led/all/refresh asi:
+--         if self.device then self.device[method](self.device, ...) end
+--     => con .device nil esas llamadas son NO-OPS SILENCIOSOS (no dan error).
+-- Leer .device es, por tanto, la unica forma publica de saber si los LEDs van a
+-- llegar realmente al hardware. Si el aparato se reengancha con OTRO nombre, el
+-- autofill de Grid.new lo manda a otro vport y el vport 1 se queda sin .device:
+-- por eso hay que ESCANEAR, no asumir el 1.
+function GridNav.find_device_port()
+   for n = 1, 4 do
+      local vp = grid.connect(n)
+      if vp and vp.device then return n end
+   end
+   return nil
 end
 
 function GridNav.key(G, g, x, y, z, simulated)
@@ -246,9 +277,19 @@ function GridNav.key(G, g, x, y, z, simulated)
            G.patch[G.focus.source][obj.id] = next_val; SC.update_matrix(obj.id,G)
         else
            G.focus.dest=obj.id; G.focus.last_dest=obj.id; G.focus.dest_timer=util.time()
+           -- [v3.01] Capturar la fuente AHORA, no leerla dentro de 0.8s.
+           -- Antes el cierre hacia `G.patch[G.focus.source][obj.id]` al despertar.
+           -- Si entre medias `G.focus.source` se volvia nil (soltar la fuente,
+           -- cargar un snapshot), eso era `G.patch[nil]` -> "table index is nil"
+           -- DENTRO de una corrutina de clock: un error que norns imprime pero
+           -- que aborta la corrutina. Ahora se fija el valor y se comprueba.
+           local focus_src = G.focus.source
            clock.run(function() 
                clock.sleep(0.8)
-               if z==1 and G.focus.dest==obj.id then G.patch[G.focus.source][obj.id]=0.0; SC.update_matrix(obj.id,G) end 
+               if focus_src and G.patch[focus_src] and G.focus.dest == obj.id then
+                  G.patch[focus_src][obj.id] = 0.0
+                  SC.update_matrix(obj.id, G)
+               end 
            end)
         end
       else G.focus.inspect_dest = obj.id end

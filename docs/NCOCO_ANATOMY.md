@@ -709,17 +709,29 @@ Se deja anotado como candidato, no como causa cerrada.
 (al máximo), los LFOs no se mueven, pero **sigue respondiendo a las
 pulsaciones**. Ocurre de repente, a veces sin tocar nada.
 
-### Lo que NO está demostrado
+### La repro en directo (2026-02) — lo que cambió el diagnóstico
 
-La hipótesis de que "el OSC se para y los valores se congelan" se ha
-**rebajado**. Encaja con el síntoma, pero **no hay prueba**: nunca se ha
-reproducido a voluntad. Cuatro intentos anteriores fallaron; este quinto añade
-detección, no una certeza.
+El grid volvió a congelarse **en plena sesión**. Datos duros de ese fallo:
 
-**Corrección importante al párrafo anterior de este documento**: se afirmaba
-que el `pcall` "no disparó nunca porque no había error". Eso es una suposición,
-no un hecho medido. Lo único verificable es que **el código no cambió el
-comportamiento** de los intentos previos, y eso no prueba dónde está la causa.
+- **Maiden no imprimió NADA**: ni `OSC STALLED`, ni `GRID HEARTBEAT`, ni
+  `g.device = nil`, ni `GRID_REDRAW_ERROR`.
+- Cargar un PSET **no** lo recuperó; hubo que **reiniciar ncoco**.
+
+Eso **descarta** las tres causas que Lua puede ver:
+
+- el latido solo calla si el redraw de Lua **sigue latiendo** → no es el metro;
+- sin aviso de `g.device` → no es el vport;
+- sin error de Lua → no es el `pcall`.
+
+Y **descarta la teoría del caché diferencial**: `dev_monome_grid_set_led` marca
+`dirty` **sin comparar el valor** (ver punto 3 abajo), así que el
+`reset_cache()` cada ~5 s ya forzaría un reenvío completo. Si fuera
+desincronización de caché, **se auto-curaría**.
+
+**Conclusión honesta (sin especular):** el corte está **por debajo de Lua**
+(capa serial/USB de monome, o el binding dispositivo↔vport). No hay invariante
+de Lua que lo vea — por eso los detectores callaron. Por eso, además de
+detectar, ahora se **recupera** (abajo).
 
 ### Lo que SÍ es verificable (leído del código oficial de norns)
 
@@ -738,7 +750,13 @@ Del código C de monome (norns `matron/src/device/device_monome.cc`,
 2. **`g:refresh()` solo envía los quads marcados "dirty"** (`dev_monome_refresh`
    recorre `md->dirty[]`). Llamarlo de más no gasta ancho de banda.
 
-3. **`g:led()` marca el quad como dirty y actualiza el buffer del C.**
+3. **`g:led()` marca el quad dirty SIEMPRE, sin comparar el valor.**
+   `dev_monome_grid_set_led` hace `md->data[q][...] = val; md->dirty[q] = true;`
+   sin ningún `if (data != val)`. Y en `dev_monome_refresh` la flag se limpia
+   **después** de escribir, **sin comprobar el error de escritura**. Consecuencia
+   verificable: un fallo de escritura **transitorio se auto-recupera** (la
+   siguiente pasada re-marca dirty). Un congelado que **no** se recupera solo,
+   por tanto, **no es de caché**.
 
 ### Lo que sí se corrigió (verificado)
 
@@ -749,20 +767,48 @@ Del código C de monome (norns `matron/src/device/device_monome.cc`,
 2. **`snap_timers` expira por tiempo.** Un botón de snapshot se quedaba en 15
    para siempre si moría su corrutina; `reset_cache` no lo limpiaba.
 3. **`ui.lua:89`** leía `G.sources_val[7]` sin el `or 0` que usa el resto.
-4. **Detectores** (no parches): el OSC marca su llegada (`G.last_osc_time`); si
-   se para >1.5 s, se registra. Un latido (`clock.run` aparte) comprueba que el
-   metro del grid sigue disparando y que `g.device` no es nil. **Ninguno borra
-   la rejilla**: un falso positivo sería peor que el fallo.
+4. **El caso "el OSC nunca arrancó" (`last_osc_time == 0`)** antes era invisible:
+   el guardia exigía `> 0`. Ahora se registra (`OSC NEVER STARTED`).
+5. **`grid.add` engancha el vport del dispositivo** (`dev.port`), no el 1 a
+   ciegas. Antes, si el aparato reenganchaba en otro vport, el 1 quedaba sin
+   `.device` y todos los LEDs eran no-ops silenciosos (bug latente).
+6. **Recuperación en caliente (`recover_grid`)** — ver abajo.
 
-### Por qué NO se actúa automáticamente
+### Recuperación en caliente: `recover_grid`
 
-La versión anterior de este arreglo **borraba la rejilla** (`g:all(0)`) ante un
-OSC parado. Es peligroso: si el detector se equivoca, provoca exactamente el
-apagón que intenta evitar. Se retiró. Ahora todo es registro, para que el
-próximo fallo en directo **deje rastro** en vez de ser un misterio.
+Se rehace **en vivo**, sin re-seleccionar el script, lo que un reinicio de norns
+le hace a la rejilla (verificado en `lua/core/script.lua`: `Script.clear()` llama
+a `grid.cleanup()` —que por dispositivo hace `dev:all(0); dev:refresh()`— y a
+`metro.free_all()`):
+
+1. **Reengancha el vport con dispositivo.** `GridNav.find_device_port()` escanea
+   los 4 vports (`grid.lua`) y devuelve el que tiene `.device`.
+2. **Fuerza reenvío completo** con `g:all(0); g:refresh()`. `all()` marca dirty
+   en todos los quads sin comparar valor, así que el cache diferencial de Lua
+   **no puede** bloquear el reenvío.
+3. **Reinicia el metro** (`grid_metro:stop(); grid_metro:start()`). `Metro:start()`
+   reusa el mismo id (solo `metro.init()` consume de `Metro.available`): **sin
+   fuga de ids**. Se hace fuera del propio callback, en el sistema `clock`.
+
+**Cuándo se dispara SOLA** (estados que por sí mismos YA son el fallo, sin
+falsos positivos posibles):
+
+- `sin redraw > 3 s` → el metro del grid dejó de disparar.
+- `g.device = nil` → los `g:led`/`g:refresh` son no-ops silenciosos.
+
+**Cuándo a MANO.** Para el congelado que **no se ve desde Lua** (por debajo,
+capa serial/USB), no hay señal que disparar, así que se expone a maiden:
+
+```lua
+>> recover_grid()
+```
+
+**Lo que NO se toca.** El caso "el `/update` de SC se para" solo lo rearmaría
+`engine.load()`, que re-ejecuta `init` y **re-asigna los buffers de 60 s** →
+cortaría el audio en directo. Ese caso se **registra**, no se "arregla" a ciegas.
 
 **Lección:** la función de un diagnóstico no es adivinar la causa, es hacer que
-el fallo sea observable. Eso es lo que faltó en los cuatro intentos previos.
+el fallo sea observable — y, cuando el coste de equivocarse es nulo, **actuar**.
 
 ### Ojo: esto no arregla el fallo del secuenciador
 

@@ -13,7 +13,16 @@
 -- 2. FIX: refresh() del grid se llama siempre (ver lib/grid_nav.lua v2.06).
 -- 3. NEW: VERSION centralizada (NCOCO_VERSION). Antes la versión estaba
 --    dispersa en cada archivo y el banner quedó en v2.14 durante toda la v3.00.
--- 4. NEW: detectores de congelado (OSC parado / latido) solo registran.
+-- 4. NEW: recuperacion del grid EN CALIENTE (recover_grid). Rehace lo que un
+--    reinicio de norns le hace a la rejilla --reengancha el vport con
+--    dispositivo, fuerza reenvio completo (all()+refresh) y reinicia el metro--
+--    sin recargar el script. Se dispara sola ante "sin redraw >3s" y
+--    "g.device nil" (estados que YA son el fallo, sin falsos positivos), y a
+--    mano con >> recover_grid() desde maiden para el caso no detectable desde
+--    Lua. El caso "el /update de SC se para" NO se toca: engine.load()
+--    re-asignaria los buffers de 60 s y cortaria el audio.
+-- 5. NEW: guardas or 0 en las 24 lecturas de /update (args[23]/[24] incluidos):
+--    si SC manda menos argumentos, no reventaba el handler OSC.
 -- CLEANUP v3.00 FASE 1 (no functional change):
 -- 1. REVERTED: is_bipolar_param() + 2nd arg of normalize() restored (breaking
 --    the 16n when normalize() came back to its 2-arg signature).
@@ -81,6 +90,7 @@ local g = grid.connect()
 local grid_metro
 local screen_metro
 local clock_ids = {}
+local grid_recover_cid   -- [v3.01] id del clock de recuperacion del grid
 
 if not util.file_exists(_path.audio .. "ncoco") then
   util.make_dir(_path.audio .. "ncoco")
@@ -314,6 +324,51 @@ local function get_petal_param(id)
    return (r==1) and "p"..id.."f_lfo" or "p"..id.."f_aud"
 end
 
+-- [v3.01] RECUPERACION DE LA REJILLA EN CALIENTE (sin re-seleccionar el script).
+-- Rehace, en vivo, lo que un reinicio de norns le hace a la rejilla. Cada paso
+-- esta confrontado con el codigo oficial, no con una hipotesis:
+--   1. REENGANCHE DE VPORT. grid.connect(n) devuelve Grid.vports[n] y su campo
+--      .device lo pone Grid.update_devices() (grid.lua). Si el aparato reengancho
+--      con otro nombre, queda en otro vport y el 1 se queda sin .device (eso
+--      convierte cada g:led en un no-op silencioso, vport.lua).
+--      GridNav.find_device_port() escanea los 4 vports y devuelve el que SI tiene
+--      dispositivo; aqui se reengancha.
+--   2. REENVIO COMPLETO FORZADO. dev_monome_all_led (device_monome.cc) marca
+--      dirty en TODOS los quads SIN comparar el valor, asi que all()+refresh
+--      garantiza un reenvio que el cache diferencial de Lua no puede bloquear.
+--   3. REINICIO DEL METRO. Metro:start() REUSA el mismo id (metro.lua: solo
+--      metro.init() consume de Metro.available), asi que no hay fuga de ids.
+--      Se hace fuera del propio callback (en el sistema clock) para no
+--      re-entrar en el metro desde dentro de su evento.
+-- NO se toca el motor de SuperCollider: el caso "el /update de SC se para" solo
+-- lo rearma engine.load(), que re-asigna los buffers de 60 s y cortaria el audio
+-- en directo. Ese caso se REGISTRA, no se "arregla" a ciegas.
+local last_recover = 0
+local grid_was_attached = true
+local function recover_grid(reason)
+   local now = util.time()
+   if now - last_recover < 2.0 then return end      -- antirrebote
+   last_recover = now
+   print("GRID RECOVERY (" .. tostring(reason) .. ")")
+   local port = GridNav.find_device_port()
+   if port and g ~= grid.connect(port) then
+      g = grid.connect(port)
+      print("  -> reenganchado a vport " .. port)
+   end
+   if g.device then g:all(0); g:refresh() end
+   GridNav.reset_cache()
+   if grid_recover_cid then clock.cancel(grid_recover_cid) end
+   grid_recover_cid = clock.run(function()
+      clock.sleep(0.05)
+      if grid_metro then grid_metro:stop(); grid_metro:start() end
+   end)
+   clock_ids[8] = grid_recover_cid
+   grid_was_attached = (g.device ~= nil)
+end
+-- Disponible desde maiden para el caso que NO se puede detectar desde Lua
+-- (congelado por debajo de Lua):  >> recover_grid()
+_G.recover_grid = function() recover_grid("manual") end
+
 function init()
   -- Seed random generator for unique petal sounds each session
   -- (PSETs overwrite these values on load, so consistency is preserved)
@@ -392,6 +447,8 @@ function init()
     -- Detectar "no llegan datos" es lo que faltaba; el pcall de abajo solo
     -- detecta "el codigo de Lua falla", que es otro problema.
     local grid_stale_count = 0
+    local osc_watch_start = util.time()
+    local osc_never_warned = false
     grid_metro.event = function()
        local ok, err = pcall(GridNav.redraw, G, g)
        if not ok then
@@ -399,18 +456,24 @@ function init()
           print("GRID_REDRAW_ERROR [" .. grid_error_count .. "]: " .. tostring(err))
           GridNav.reset_cache()
           if grid_error_count >= 10 then
-             print("GRID FREEZE DETECTED - Forcing full LED reset")
-             g:all(0); g:refresh()
+             print("GRID FREEZE DETECTED (redraw fallando) - recuperando")
+             recover_grid("redraw error x10")
              grid_error_count = 0
           end
        else
           grid_error_count = 0
        end
 
-       -- [v3.00] Detector de OSC parado. NO actua: solo deja constancia.
-       -- La hipotesis (el /update deja de llegar y los valores se congelan)
-       -- NO esta demostrada, asi que no se fuerza ningun cambio de LEDs:
-       -- borrar la rejilla ante un falso positivo seria peor que el fallo.
+       -- [v3.01] Detector de OSC parado. NO actua sobre SuperCollider.
+       -- REALIDAD verificada (lib/Engine_Ncoco.sc): /update lo emite
+       --   SendReply.kr(Impulse.kr(30), '/update', [...]) DENTRO del synth
+       --   NcocoCore, y un OSCFunc de sclang lo reenvia a norns:10111.
+       --   Es decir: /update vive y muere con el motor de SC.
+       -- La unica forma de rearmarlo desde Lua seria engine.load(), que re-ejecuta
+       --   init y RE-ASIGNA los buffers de 60 s -> cortaria el audio en directo.
+       --   Por eso NO se dispara solo: seria peor que el fallo. Se registra y
+       --   ademas se cubre el caso "nunca arranco" (last_osc_time == 0), que antes
+       --   quedaba invisible porque el guardia exigia > 0.
        if G.last_osc_time > 0 then
           local stale = util.time() - G.last_osc_time
           if stale > 1.5 and grid_stale_count == 0 then
@@ -418,40 +481,59 @@ function init()
           end
           if stale > 1.5 then grid_stale_count = grid_stale_count + 1
           else grid_stale_count = 0 end
+       elseif not osc_never_warned and (util.time() - osc_watch_start) > 5.0 then
+          osc_never_warned = true
+          print("OSC NEVER STARTED: no ha llegado ni un /update en 5s (motor SC?)")
        end
     end
     grid_metro:start()
 
-    -- [v3.00] LATIDO / HEARTBEAT (detector, no parche a ciegas)
-    -- Un metro de norns NO propaga su error al script: norns lo imprime y sigue.
-    -- Lo que NO se detectaba hasta ahora es que el metro dejase de disparar, o
-    -- que g.device quedase nil (en cuyo caso g:led/g:refresh son no-ops
-    -- SILENCIOSOS: grid.connect() devuelve un vport, no el dispositivo).
-    -- Este latido es un clock.run aparte: si el metro muere, este sigue vivo.
-    -- NO reinicia el metro (evita fugas de IDs: solo hay 30) ni borra la
-    -- rejilla (seria un parpadeo peor que el fallo). Solo deja constancia.
+    -- [v3.01] LATIDO / HEARTBEAT. Antes solo imprimia; ahora ACTUA cuando el
+    -- estado implica congelacion SEGURA (sin falsos positivos posibles):
+    --   - sin redraw >3 s  => el metro del grid dejo de disparar (o Lua falla
+    --     a mitad de redraw). La rejilla esta congelada de hecho: recuperar es
+    --     obligatorio, y un parpadeo de un frame es irrelevante frente a eso.
+    --   - g.device = nil => los g:led/g:refresh son no-ops silenciosos
+    --     (vport.lua): los LEDs tampoco llegan. Se reengancha el vport.
+    -- El latido vive en el sistema clock (aparte del metro), asi que sigue
+    -- disparando aunque el metro este muerto. NO es un parche a ciegas: solo se
+    -- dispara ante esos dos estados, que por si mismos ya son el fallo.
+    local grid_boot = util.time()
     local cid_heartbeat = clock.run(function()
        while true do
           clock.sleep(2.0)
-          local last = GridNav.last_redraw or 0
-          if last > 0 and (util.time() - last) > 3.0 then
+          local last = GridNav.last_redraw
+          local ref = (last and last > 0) and last or grid_boot
+          if (util.time() - ref) > 3.0 then
              print("GRID HEARTBEAT: sin redraw desde hace " ..
-                   string.format("%.1f", util.time() - last) .. "s (metros ok?)")
+                   string.format("%.1f", util.time() - ref) .. "s -> recuperando")
+             recover_grid("sin redraw")
           end
           if not g.device then
-             print("GRID HEARTBEAT: g.device = nil -- los LEDs no llegan al hardware")
+             if grid_was_attached then
+                print("GRID HEARTBEAT: g.device = nil (LEDs no llegan) -> recuperando")
+                recover_grid("g.device nil")
+             end
+          else
+             grid_was_attached = true
           end
        end
     end)
     clock_ids[7] = cid_heartbeat
-    -- NOTE: clock_ids queda DISPERSO a proposito (1..5 y 7). cleanup() lo
+    -- NOTE: clock_ids queda DISPERSO a proposito (1..5, 7 y 8). cleanup() lo
     -- recorre con pairs, nunca con ipairs. Ver el comentario de cleanup().
     
-    -- [FIX] Grid Auto-Heal callback
-    grid.add = function()
-       print("Grid Reconnected - Resetting Cache")
-       g = grid.connect()
+    -- [v3.01] Grid auto-heal. grid.add recibe el dispositivo nuevo (grid.lua:
+    -- Grid.add(g)), asi que se engancha SU vport, no el 1 a ciegas. Antes era
+    -- grid.connect sin argumento => SIEMPRE vport 1: si el aparato reenganchaba
+    -- en otro vport, el 1 se quedaba sin .device y todos los LEDs eran no-ops
+    -- silenciosos (bug latente, verificado en grid.lua/vport.lua).
+    grid.add = function(dev)
+       local port = dev and dev.port
+       print("Grid Reconnected - Resetting Cache" .. (port and (" (vport "..port..")") or ""))
+       if port then g = grid.connect(port) end
        GridNav.reset_cache()
+       grid_was_attached = (g.device ~= nil)
     end
 
     screen_metro = metro.init(); screen_metro.time = 1/30
