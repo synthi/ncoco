@@ -671,7 +671,7 @@ WAV + los secuenciadores.
 | ~~Baja~~ | ~~`GridNav.is_dirty` se escribe en 5 sitios pero nunca se lee~~ | **RESUELTO** `ea40a9a` (eliminado a propósito) |
 | **Baja** | `MAX_BRIGHT` / `FADER_BG` y otras constantes sin uso en `globals.lua` | Pendiente |
 | ~~Info~~ | ~~`Storage.save` serializa `double_click_timer` (una corrutina)~~ | **FALSO POSITIVO.** `tab.save` la salta sin fallar. Nada roto. |
-| **Info** | Secuenciador: grabación seguida de reproducción vacía, esporádica | **SIN CAUSA.** No se reproduce en local. |
+| **Info** | Secuenciador: grabación seguida de reproducción vacía, esporádica | **BUG REAL ENCONTRADO** `f1b8450`. Ver nota abajo. |
 
 ---
 
@@ -682,9 +682,28 @@ WAV + los secuenciadores.
 umbral y 4 segmentos de más en el trazo. **No afecta al sonido ni a los datos** —
 es geometría del dibujo. Preexistente, no introducido en v3.00.
 
+### Nota sobre el secuenciador (v3.01)
+
+Se encontró un **bug real de referencias**, no una hipótesis:
+
+`run_sequencer()` captura `local s = G.sequencers[id]` **una sola vez** al
+arrancar. `Storage.load` hacía `G.sequencers = data.sequencers`, es decir
+**reemplazaba la tabla**. A partir de ahí:
+
+- `GridNav.key` grababa en la tabla **nueva**;
+- la corrutina de reproducción leía la tabla **vieja**.
+
+Resultado: grabar parece funcionar y la reproducción sale **vacía** o con datos
+rancios. Corregido mutando campo a campo (`f1b8450`), de modo que toda
+referencia viva sigue apuntando a la misma tabla.
+
+`[NO DEMOSTRADO]` **No está probado que este sea el fallo esporádico original.**
+Encaja con "grabo y suena vacío", pero se desconoce cuándo ocurre exactamente.
+Se deja anotado como candidato, no como causa cerrada.
+
 ---
 
-## 17. Congelado del grid (v3.00) — REVISION HONESTA
+## 17. Congelado del grid (v3.01) — REVISION HONESTA
 
 **Síntoma:** la rejilla se queda fija con el brillo del último valor recibido
 (al máximo), los LFOs no se mueven, pero **sigue respondiendo a las

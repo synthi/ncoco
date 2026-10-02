@@ -1,4 +1,7 @@
--- lib/ui.lua v2.15
+-- lib/ui.lua v3.01
+-- CHANGELOG v3.01:
+-- 1. FIX: draw_main leia G.sources_val[7] y [8] SIN el `or 0` que usa el resto
+--    del archivo. Un nil tumbaba el redraw de pantalla entero.
 -- FIX v3.00:
 -- 1. B7: BIT_NAMES[4] "μ-law" -> "u-law". The norns builtin 6x13 font has NO glyph
 --    for U+03BC (GREEK SMALL LETTER MU) — only ASCII 32..126. The UTF-8 bytes

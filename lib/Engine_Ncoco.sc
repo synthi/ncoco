@@ -1,4 +1,6 @@
-// Engine_Ncoco.sc v3.00
+// Engine_Ncoco.sc v3.01
+// v3.01: SOLO se actualizó la etiqueta de versión (unificación del proyecto).
+//   El CÓDIGO del motor NO se tocó en v3.01.
 // v3.00 FASE 2 - BIT MODES: single per-mode selector (see BIT_MODES_FINDINGS.md).
 // 1. REPLACE bitDepthL/R (8/12/14) + is8/is12/isAdpcm flags with modeL/R (0-3).
 //    The old index arithmetic (is8 + is12*2 + isAdpcm*3) could NEVER reach the

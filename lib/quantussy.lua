@@ -1,4 +1,4 @@
--- lib/quantussy.lua v2.01
+-- lib/quantussy.lua v3.01
 -- CLEANUP v3.00 FASE 1:
 -- 1. FIX (B8): a missing petal coordinate used to `return` out of the whole
 --    draw loop, killing the other 5 petals. It now skips only that petal.

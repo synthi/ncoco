@@ -1,4 +1,19 @@
--- ncoco.lua v2.14
+-- ncoco.lua v3.01
+-- v3.01 — UNIFICACIÓN DE VERSIONES. Antes cada archivo llevaba su propio
+--   "vN.NN" y el banner del script quedó en v2.14 durante toda la v3.00: no
+--   había una única fuente de verdad. Desde v3.01 TODOS los archivos del
+--   proyecto comparten el mismo número, y NCOCO_VERSION (abajo) es la fuente
+--   autoritativa de lo que se muestra al arrancar.
+-- CHANGELOG v3.01:
+-- 1. FIX: el latido (heartbeat) no se registraba en clock_ids, así que
+--    cleanup() no lo cancelaba: quedaba corriendo tras cambiar de script.
+--    Y cleanup() usaba ipairs sobre una tabla dispersa (1..5 y 7): se
+--    detenía en el hueco. Ahora usa pairs. Es la MISMA trampa de ipairs que
+--    rompió el 16n con midi.devices.
+-- 2. FIX: refresh() del grid se llama siempre (ver lib/grid_nav.lua v2.06).
+-- 3. NEW: VERSION centralizada (NCOCO_VERSION). Antes la versión estaba
+--    dispersa en cada archivo y el banner quedó en v2.14 durante toda la v3.00.
+-- 4. NEW: detectores de congelado (OSC parado / latido) solo registran.
 -- CLEANUP v3.00 FASE 1 (no functional change):
 -- 1. REVERTED: is_bipolar_param() + 2nd arg of normalize() restored (breaking
 --    the 16n when normalize() came back to its 2-arg signature).
@@ -42,6 +57,10 @@
 -- 2. BASE: v9000.
 
 engine.name = 'Ncoco'
+-- [v3.01] Version centralizada. Antes cada archivo llevaba su "vN.NN" y el
+-- banner del script se quedo en v2.14 durante toda la v3.00: no habia una
+-- unica fuente de verdad. Esto es lo que se muestra al arrancar.
+local NCOCO_VERSION = "3.01"
 
 local function safe_include(name)
   local ok, result = pcall(include, name)
@@ -411,7 +430,7 @@ function init()
     -- Este latido es un clock.run aparte: si el metro muere, este sigue vivo.
     -- NO reinicia el metro (evita fugas de IDs: solo hay 30) ni borra la
     -- rejilla (seria un parpadeo peor que el fallo). Solo deja constancia.
-    clock.run(function()
+    local cid_heartbeat = clock.run(function()
        while true do
           clock.sleep(2.0)
           local last = GridNav.last_redraw or 0
@@ -424,6 +443,9 @@ function init()
           end
        end
     end)
+    clock_ids[7] = cid_heartbeat
+    -- NOTE: clock_ids queda DISPERSO a proposito (1..5 y 7). cleanup() lo
+    -- recorre con pairs, nunca con ipairs. Ver el comentario de cleanup().
     
     -- [FIX] Grid Auto-Heal callback
     grid.add = function()
@@ -507,7 +529,7 @@ function init()
     clock_ids[5] = cid_16n
     
     G.loaded = true 
-    print("Ncoco v2.14 Ready.")
+    print("Ncoco v" .. NCOCO_VERSION .. " Ready.")
   end)
 end
 
@@ -535,7 +557,11 @@ end
 function cleanup()
   if grid_metro then grid_metro:stop() end
   if screen_metro then screen_metro:stop() end
-  for _, cid in ipairs(clock_ids) do
+  -- [v3.01] pairs, NO ipairs. clock_ids es DISPERSO (1..5 y 7: el 6 no existe),
+  -- e ipairs se detiene en el primer hueco: el latido del indice 7 nunca se
+  -- cancelaria y seguiria imprimiendo tras cambiar de script.
+  -- Es la misma trampa que rompio el 16n al recorrer midi.devices con ipairs.
+  for cid_id, cid in pairs(clock_ids) do
      if cid then clock.cancel(cid) end
   end
   clock_ids = {}

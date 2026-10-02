@@ -1,5 +1,5 @@
--- lib/grid_nav.lua v2.05
--- v3.00 FASE 4 (congelado del grid):
+-- lib/grid_nav.lua v3.01
+-- v3.01 (continúa la FASE 4 del congelado del grid):
 -- 1. refresh() se llama SIEMPRE, no solo `if changed`. Un error a mitad del
 --    bucle podia dejar quads dirty sin que nadie los reenviara (ver el
 --    comentario en el propio redraw). refresh() no gasta mas: el C solo manda

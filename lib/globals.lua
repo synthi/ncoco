@@ -1,4 +1,7 @@
--- lib/globals.lua v2.02
+-- lib/globals.lua v3.01
+-- CHANGELOG v3.01:
+-- 1. NEW: M.last_osc_time — marca del ultimo /update recibido de SC. La usa
+--    el detector de OSC parado en ncoco.lua. NO actua: solo registra.
 -- CHANGELOG v2.02:
 -- 1. CLEANUP: Removed M.fader_inverted (moved to 16n.lua as _16n.inverted).
 

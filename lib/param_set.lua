@@ -1,4 +1,4 @@
--- lib/param_set.lua v2.15
+-- lib/param_set.lua v3.01
 -- FIX v3.00:
 -- 1. B7: the 4th Bits option "μ-law" -> "u-law". The norns builtin 6x13 font has
 --    NO glyph for U+03BC (GREEK SMALL LETTER MU) — only ASCII 32..126. The

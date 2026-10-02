@@ -1,4 +1,7 @@
--- lib/16n.lua v2.03
+-- lib/16n.lua v3.01
+-- NOTA v3.01: SOLO se actualizó la etiqueta de versión (unificación del
+--   proyecto). El CÓDIGO de este archivo NO se tocó: sigue fuera de alcance
+--   sin prueba en hardware. Ver docs/BIT_MODES_FINDINGS.md §6.
 -- CHANGELOG v2.03:
 -- 1. FIX: Removed midi inversion from normalize() — hardware already provides inverted signal.
 -- 2. FIX: Changed taper logic — pivot changes based on orientation:

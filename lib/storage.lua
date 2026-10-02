@@ -1,4 +1,10 @@
--- lib/storage.lua v2.01
+-- lib/storage.lua v3.01
+-- v3.01 (continúa la FASE 4): BUG DEL SECUENCIADOR.
+-- Storage.load hacia `G.sequencers = data.sequencers`, pero run_sequencer()
+-- capturo `local s = G.sequencers[id]` al arrancar y guarda esa referencia.
+-- Tras cargar un PSET, la corrutina leia la tabla VIEJA mientras GridNav.key
+-- grababa en la NUEVA: grabar funcionaba y la reproduccion leia datos rancios.
+-- Ahora se muta campo a campo y toda referencia viva sigue siendo valida.
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9007:
