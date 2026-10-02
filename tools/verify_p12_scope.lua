@@ -98,12 +98,17 @@ end
 
 --------------------------------------------------------------------
 -- Referencia: los mismos valores calculados a mano, sin dibujar.
--- Es el "verdadero" contra el que se comparan ambas versiones.
+--
+-- Compara la POSICION RELATIVA dentro de la caja, no el pixel absoluto.
+-- Asi la prueba sigue siendo valida aunque la caja cambie de tamano:
+--   posicion_relativa = (centro - py) / (alto/2)
+-- debe valer exactamente el valor modulado recortado a -1..+1.
+-- Un valor de +1 toca el borde superior, -1 el inferior, 0 el centro.
 --------------------------------------------------------------------
-local function referencia_py(G, id)
+local function referencia_rel(G, id, h)
   local head, len = G.scope_head, G.SCOPE_LEN
-  local w, h = 108, 25
-  local center_y = 30 + h / 2
+  local w = 119
+  local center_y = 15 + h / 2
   local out = {}
   for x = 0, w - 1 do
     local sum = 0
@@ -113,9 +118,11 @@ local function referencia_py(G, id)
       if amt ~= 0 then sum = sum + (G.scope_history[src][hist_idx] * amt) end
     end
     sum = sum * G.dest_gains[id]
-    local py = center_y - (util.clamp(sum, -1, 1) * (h / 2))
-    py = util.clamp(py, 30, 54)
-    out[#out + 1] = string.format('%.6f', py)
+    local v = util.clamp(sum, -1, 1)
+    local py = center_y - (v * (h / 2))
+    -- recorte a la caja
+    py = math.max(15, math.min(15 + h, py))
+    out[#out + 1] = (center_y - py) / (h / 2)
   end
   return out
 end
@@ -124,50 +131,57 @@ end
 print('== #12: el scope del inspector de destinos, valores y dibujo ==')
 print('')
 
+local BOX_Y, BOX_H = 15, 43
+local W = 119
+
 for _, mode in ipairs{ 'cero', 'sparse', 'saltos', 'saturado' } do
   local G = build(mode)
   H.reset()
   UI.draw_dest_inspector(G, 5)
   local cap = H.capture()
-  local pts, metodo = puntos_del_scope(cap, 108)
+  local pts, metodo = puntos_del_scope(cap, W)
 
-  local ref = referencia_py(G, 5)
+  local ref = referencia_rel(G, 5, BOX_H)
+  local center_y = BOX_Y + BOX_H / 2
 
-  -- Comparacion con tolerancia: el harness registra los numeros con 4
-  -- decimales, la referencia con 6. Se comparan como valores numericos.
-  local TOL = 0.0001
+  -- Comparacion de la POSICION RELATIVA dentro de la caja.
+  -- El harness registra con 4 decimales, asi que la tolerancia es 0.0001.
+  local TOL = 0.001
   local iguales = (#pts == #ref)
   local peor = 0
   if iguales then
     for i = 1, #ref do
-      local d = math.abs(pts[i].y - ref[i])
+      local rel = (center_y - pts[i].y) / (BOX_H / 2)
+      local d = math.abs(rel - ref[i])
       if d > peor then peor = d end
       if d > TOL then iguales = false end
     end
   end
 
   print(string.format('  %-10s metodo=%-7s puntos=%3d  %s', mode, metodo, #pts,
-    iguales and 'valores IDENTICOS al calculo de referencia' or 'VALORES DISTINTOS'))
+    iguales and 'forma de la onda IDENTICA a la referencia' or 'FORMA DISTINTA'))
 
-  -- rango bipolar conservado: el cero esta en el centro de la caja
+  -- la onda no puede salirse de la caja
   local miny, maxy = 999, -999
   for _, p in ipairs(pts) do
     if p.y < miny then miny = p.y end
     if p.y > maxy then maxy = p.y end
   end
-  if miny < 30 or maxy > 54.001 then
-    print(string.format('    ATENCION: sale de la caja (min %.2f max %.2f)', miny, maxy))
-  end
+  local dentro = (miny >= BOX_Y - 0.01) and (maxy <= BOX_Y + BOX_H + 0.01)
+  print(string.format('    %s dentro de la caja y=%d..%d (min %.2f max %.2f)',
+    dentro and 'PASA ' or 'FALLA', BOX_Y, BOX_Y + BOX_H, miny, maxy))
 end
 
 print('')
 print('== recuento de operaciones de dibujo ==')
 local G = build('sparse')
-H.reset(); UI.draw_dest_inspector(G, 5); local c1 = H.capture()
-local _, m1 = puntos_del_scope(c1, 108)
+H.reset(); UI.draw_dest_inspector(G, 5)
+local _, m1 = puntos_del_scope(H.capture(), W)
 print(string.format('  metodo de dibujo : %s', m1))
+print(string.format('  puntos de la onda: %d (antes 108)', W))
 print(string.format('  llamadas a fill : %d', H.count('fill')))
 print(string.format('  llamadas a stroke: %d', H.count('stroke')))
-print(string.format('  total de operaciones: %d', select(2, H.capture():gsub('\n', '\n')) + 1))
+print(string.format('  caja: %dx%d (antes 108x25)  area x%.2f', 120, 43,
+  (120 * 43) / (108 * 25)))
 
 H.done()

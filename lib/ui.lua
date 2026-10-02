@@ -135,24 +135,43 @@ function UI.draw_dest_inspector(G, id)
      sub = "K2/3: MODE"
   end
 
+  -- v3.00 Fase 3: caja del scope ampliada y cabecera compacta en UNA fila.
+  -- Antes 108x25 en (10,30), con la cabecera en tres filas: "IN GAIN:" en
+  -- y=10, su valor en y=18 y el titulo en y=20.
+  -- Ahora: titulo a la izquierda y "E3 GAIN IN: valor" a la derecha, en la
+  -- misma fila de y=6. Se elimina la pista de abajo "E3: IN GAIN", que era
+  -- redundante con el control ya visible en la cabecera.
+  -- Caja: de 108x25 a 120x46, area x2.04. El cero sigue en el CENTRO, que es
+  -- lo correcto porque la modulacion puede ir a mas o a menos.
+  local BOX_X, BOX_Y, BOX_W, BOX_H = 4, 15, 120, 43
+
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)
-  screen.move(64, 20); screen.text_center(title)
+  screen.move(3, 6); screen.text(title)
   
   if sub ~= "" then
-     screen.level(4); screen.move(64, 10); screen.text_center(sub)
+     screen.level(4); screen.move(3, 62); screen.text(sub)
   end
   
-  screen.level(3); screen.move(126, 10); screen.text_right("IN GAIN:"); screen.level(15)
-  screen.move(126, 18); screen.text_right(string.format("%.2fx", G.dest_gains[id]))
-  screen.rect(10, 30, 108, 25); screen.stroke()
+  -- cabecera en UNA sola fila: titulo izquierda, "E3 GAIN IN: valor" derecha
+  screen.level(3)
+  screen.move(126, 6); screen.text_right("E3 GAIN IN: "..string.format("%.2fx", G.dest_gains[id]))
+  screen.level(15)
+  screen.rect(BOX_X, BOX_Y, BOX_W, BOX_H); screen.stroke()
   
   if id==5 or id==6 or id==7 or id==12 or id==13 or id==14 then
-     local thresh_y = 36
+     local thresh_y = BOX_Y + 11
      screen.level(2)
-     for tx=10, 118, 4 do screen.pixel(tx, thresh_y) end
+     for tx=BOX_X+1, BOX_X+BOX_W-1, 4 do screen.pixel(tx, thresh_y) end
+     -- v3.00 Fase 3: FILL explicito. Antes el primer fill() del scope
+     -- (dentro del bucle) venia a rellenar estos puntos por casualidad.
+     -- Al pasar la onda a una sola linea con un unico stroke(), estos puntos
+     -- se acumulaban en el trazo y se dibujaban por su BORDE, quedando
+     -- visiblemente mas gruesos. Hay que cerrarlos aqui.
+     screen.fill()
   end
 
-  local head = G.scope_head; local len = G.SCOPE_LEN; local w, h = 108, 25; local center_y = 30 + h/2
+  local head = G.scope_head; local len = G.SCOPE_LEN
+  local w, h = 119, BOX_H; local center_y = BOX_Y + h/2
 
   -- v3.00 Fase 3 (#14): precalcular que fuentes tienen cableado a este destino.
   -- Antes se recorrian las 12 fuentes para cada uno de los 108 pixeles
@@ -185,8 +204,8 @@ function UI.draw_dest_inspector(G, id)
     end
     sum = sum * G.dest_gains[id]
     local py = center_y - (util.clamp(sum, -1, 1) * (h/2))
-    py = util.clamp(py, 30, 54)
-    local px = 10 + w - x
+    py = util.clamp(py, BOX_Y, BOX_Y + BOX_H)
+    local px = BOX_X + w - x
     if last_px then
       screen.move(last_px, last_py); screen.line(px, py)
     else

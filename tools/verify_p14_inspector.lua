@@ -143,15 +143,15 @@ end
 -- El codigo dibuja la linea de umbral para los destinos
 -- 5, 6, 7, 12, 13 y 14. El resto no.
 local p5, l5 = medir(5)
-eq('destino 5: 28 pixeles de umbral + 1 inicial de la onda', p5, 29)
-eq('destino 5: 107 segmentos de onda', l5, 107)
+eq('destino 5: 29 pixeles de umbral + 1 inicial de la onda', p5, 30)
+eq('destino 5: 114 segmentos de onda', l5, 114)
 
 local p6 = medir(6)
-eq('destino 6: tambien lleva umbral', p6, 29)
+eq('destino 6: tambien lleva umbral', p6, 30)
 
 local p9, l9, f9, s9 = medir(9)
 eq('destino 9: sin umbral, 1 pixel inicial', p9, 1)
-eq('destino 9: 107 segmentos de onda', l9, 107)
+eq('destino 9: 114 segmentos de onda', l9, 114)
 eq('destino 9: un solo relleno (el fondo)', f9, 1)
 eq('destino 9: 2 trazos (caja y onda)', s9, 2)
 
