@@ -53,8 +53,8 @@ function SC.set_feedback(id, val)
   if engine[cmd] then engine[cmd](val) end
 end
 
-function SC.set_bitdepth(id, val)
-  local cmd = id==1 and "bitDepthL" or "bitDepthR"
+function SC.set_mode(id, val)
+  local cmd = id==1 and "modeL" or "modeR"
   if engine[cmd] then engine[cmd](val) end
 end
 

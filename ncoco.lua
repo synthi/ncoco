@@ -325,7 +325,7 @@ function init()
     SC.set_rec(1, 0); SC.set_rec(2, 0)
     SC.set_feedback(1, 0.9); SC.set_feedback(2, 0.9)
     engine.loopLenL(8.0); engine.loopLenR(8.0)
-    SC.set_bitdepth(1, 8); SC.set_bitdepth(2, 8) 
+    SC.set_mode(1, 0); SC.set_mode(2, 0)   -- 0 = 8bit (default)
     
     engine.skipModeL(0); engine.skipModeR(0)
     engine.driftAmt(0.005)
@@ -612,11 +612,11 @@ function key(n,z)
     local is_link = G.focus.edit_l and G.focus.edit_r
     if G.focus.edit_l or is_link then 
        if n==3 then 
-          local v = params:get("bitsL"); params:set("bitsL", (v%3)+1)
-          if is_link then params:set("bitsR", (v%3)+1) end
+          local v = params:get("bitsL"); params:set("bitsL", (v%4)+1)
+          if is_link then params:set("bitsR", (v%4)+1) end
        end
     elseif G.focus.edit_r then 
-       if n==3 then local v=params:get("bitsR"); params:set("bitsR", (v%3)+1) end
+       if n==3 then local v=params:get("bitsR"); params:set("bitsR", (v%4)+1) end
     else 
        if n==2 then 
          local v = 1 - params:get("recL")

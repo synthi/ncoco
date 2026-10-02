@@ -30,9 +30,9 @@ local DST_NAMES = {
   [21]="VOL 1", [22]="VOL 2",
   [23]="AUD IN 1", [24]="AUD IN 2"
 }
--- v3.00 Fase 2: this table grows to 4 entries ("8bit","12bit","SBC","μ-law").
--- The menu is reindexed so existing presets keep their meaning.
-local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="SBC"}
+-- v3.00 Fase 2: 4 modes. "8bit" is the ORIGINAL tuning restored (2f85646);
+-- "μ-law" is the real companding branch, which was unreachable before.
+local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="SBC", [4]="μ-law"}
 
 function UI.update_histories(G)
   for i=1, 2 do

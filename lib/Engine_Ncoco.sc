@@ -1,4 +1,17 @@
-// Engine_Ncoco.sc v2.20
+// Engine_Ncoco.sc v3.00
+// v3.00 FASE 2 - BIT MODES: single per-mode selector (see BIT_MODES_FINDINGS.md).
+// 1. REPLACE bitDepthL/R (8/12/14) + is8/is12/isAdpcm flags with modeL/R (0-3).
+//    The old index arithmetic (is8 + is12*2 + isAdpcm*3) could NEVER reach the
+//    mu-law branch, so the menu "8bit" slot actually played mu-law. A single mode
+//    number used directly as a Select index makes that bug class impossible.
+//    (A correct modeL/R design existed in commit 7d05543.)
+// 2. MODES: 0=8bit  1=12bit  2=SBC  3=mu-law. Menu order 1/2/3 unchanged so
+//    existing PSETs keep their meaning; mu-law appended as the 4th option.
+// 3. 8-bit RESTORED from the original 8/12/16 implementation (2f85646, 2026-05-27):
+//    SR 16000, filter 7000, noise 0.008, bleed 0.0025, jitter 0.02, round(0.5**8).
+//    All six parameters were already untouched; only the quantizer had been
+//    swapped for mu-law. 12bit and SBC are bit-for-bit identical to before.
+// 4. mu-law (NEW): SR 22000, filter 11111, noise 0.006, bleed 0.0011, jitter 0.011.
 // CLEANUP v3.00 FASE 1 (no audio change):
 // 1. REMOVED dead SynthDef arg `interp=2` (never referenced; the interpolation
 //    value is computed inline from the mode flags).
@@ -92,7 +105,7 @@ Engine_Ncoco : CroneEngine {
 			flipL=0, flipR=0, skipL=0, skipR=0,           
 			volInL=1.0, volInR=1.0,     
 			
-			bitDepthL=8, bitDepthR=8,                   
+			modeL=0, modeR=0,   // 0=8bit 1=12bit 2=SBC 3=mu-law
             loopLenL=8.0, loopLenR=8.0,
 			
 			skipModeL=0, skipModeR=0, 
@@ -159,7 +172,7 @@ Engine_Ncoco : CroneEngine {
 			
 			var dryL, dryR, finalRateL, finalRateR, ptrL, ptrR, readL, readR, writeL, writeR;
 			var gateRecL, gateRecR, noiseL, noiseR, baseSR_L, baseSR_R;
-			var is8L, is12L, is8R, is12R, fixedFiltFreqL;
+			var fixedFiltFreqL;
 			var endL, endR, yellowL, yellowR;
 			var driftL, driftR, bleedL, bleedR, baseSpeedL, baseSpeedR;
 			var flipLogicL, flipLogicR, flipStateL, flipStateR, recLogicL, recLogicR;
@@ -172,7 +185,6 @@ Engine_Ncoco : CroneEngine {
             var src11_ar, src12_ar;
             var muLawEncL, muLawQuantL, muLawL;
 			var muLawEncR, muLawQuantR, muLawR;
-			var isAdpcmL, isAdpcmR;
 			// [v2.20] SBC — Sub-Band Coding 2-bandas (loBandL/R, hiBandL/R, dpcmReconL/R = 6 vars)
 			var srTrigL, srTrigR;
 			var loBandL, loBandR, hiBandL, hiBandR, dpcmReconL, dpcmReconR;
@@ -195,17 +207,16 @@ Engine_Ncoco : CroneEngine {
 			envR_raw = Amplitude.kr(inputR_sig, (envSlewR.linexp(0, 1, 0.05, 2.5) * 0.1).max(0.002), envSlewR.linexp(0, 1, 0.05, 2.5));
 			envL = envL_raw * 2.0; envR = envR_raw * 2.0;
 
-			is8L = bitDepthL < 10; is12L = (bitDepthL >= 10) * (bitDepthL < 14);
-			is8R = bitDepthR < 10; is12R = (bitDepthR >= 10) * (bitDepthR < 14);
-			isAdpcmL = bitDepthL >= 14; isAdpcmR = bitDepthR >= 14;
+			// Per-mode parameter selection. Order: 0=8bit 1=12bit 2=SBC 3=mu-law.
+			// NOTE: 8bit column is the ORIGINAL 2f85646 tuning, restored.
 			
 			// [v2.09] ADPCM: noise 0.002, bleed 0.003, SR 22000, filt 10000, jitter 0.01
-			noiseL = PinkNoise.ar((is8L * 0.008) + (is12L * 0.004) + (isAdpcmL * 0.002));
-			noiseR = PinkNoise.ar((is8R * 0.008) + (is12R * 0.004) + (isAdpcmR * 0.002));
+			noiseL = PinkNoise.ar(Select.kr(modeL, [0.008, 0.004, 0.002, 0.006]));
+			noiseR = PinkNoise.ar(Select.kr(modeR, [0.008, 0.004, 0.002, 0.006]));
 			
-			baseSR_L = (is8L * 16000) + (is12L * 31250) + (isAdpcmL * 48000);
-			baseSR_R = ((is8R * 16000) + (is12R * 31250) + (isAdpcmR * 48000)) * 1.002;
-            fixedFiltFreqL = (is8L * 7000) + (is12L * 12800) + (isAdpcmL * 16000);
+			baseSR_L = Select.kr(modeL, [16000, 31250, 48000, 22000]);
+			baseSR_R = Select.kr(modeR, [16000, 31250, 48000, 22000]) * 1.002;
+            fixedFiltFreqL = Select.kr(modeL, [7000, 12800, 16000, 11111]);
 			
             inputL_sig = inputL_sig + (noiseL * 0.5); 
             inputR_sig = inputR_sig + (noiseR * 0.5);
@@ -289,12 +300,13 @@ Engine_Ncoco : CroneEngine {
 			yellowL = (ptrL / endL.max(1)); yellowR = (ptrR / endR.max(1));
 			
             // Bleed Logic (inlined bleedAmp) — [v2.09] ADPCM: 0.003
-			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * ((is8L * 0.0025) + (is12L * 0.001) + (isAdpcmL * 0.003));
-			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * ((is8R * 0.0025) + (is12R * 0.001) + (isAdpcmR * 0.003));
+			bleedL = SinOsc.ar((baseSR_L * finalRateL.abs).clip(20, 20000)) * Select.kr(modeL, [0.0025, 0.001, 0.003, 0.0011]);
+			bleedR = SinOsc.ar((baseSR_R * finalRateR.abs).clip(20, 20000)) * Select.kr(modeR, [0.0025, 0.001, 0.003, 0.0011]);
 
 			// [v2.09] ADPCM: interpolation=1 (same as 8-bit)
-			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: (1 + (1 - is8L - is12L - isAdpcmL)));
-			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: (1 + (1 - is8R - is12R - isAdpcmR)));
+			// interpolation was 1 + (1 - flags) = 1 for every previous mode; kept at 1.
+			readL = BufRd.ar(1, bufL, ptrL, loop:1, interpolation: 1);
+			readR = BufRd.ar(1, bufR, ptrR, loop:1, interpolation: 1);
 			
             readL = readL + (noiseL * 0.5);
             readR = readR + (noiseR * 0.5);
@@ -337,7 +349,7 @@ Engine_Ncoco : CroneEngine {
 			writeL = ((dryL) + mod_val_audioInL) * gateRecL + (feedbackL);
 			writeR = ((dryR) + mod_val_audioInR) * gateRecR + (feedbackR);
 			
-			// μ-law 8-bit companding when is12L (bitDepthL==12)
+			// mu-law 8-bit companding (used when modeL==3)
 			muLawEncL = writeL.sign * (1 + (255 * writeL.abs)).log / 256.log;
 			muLawQuantL = muLawEncL.round(2/255);
 			muLawL = muLawQuantL.sign * ((muLawQuantL.abs * 256.log).exp - 1) / 255;
@@ -352,8 +364,8 @@ Engine_Ncoco : CroneEngine {
 // Feedforward puro, sin bloques, sin feedback, sin LocalIn/Out extra.
 
 // srTrigL/R compartidos con 8-bit/μ-law (sin cambios).
-srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8L * 0.02) + (is12L * 0.004) + (isAdpcmL * 0.01))));
-srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar((is8R * 0.02) + (is12R * 0.004) + (isAdpcmR * 0.01))));
+srTrigL = Impulse.ar((baseSR_L * finalRateL.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeL, [0.02, 0.004, 0.01, 0.011]))));
+srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNoise.ar(Select.kr(modeR, [0.02, 0.004, 0.01, 0.011]))));
 
 // SBC 2-bandas: crossover 6.8kHz, cuantización independiente por banda
 		loBandL = LPF.ar(writeL, 6800);
@@ -365,18 +377,20 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 	dpcmReconL = loBandL.round(2 ** (-9)) + hiBandL.round(2 ** (-4));
 	dpcmReconR = loBandR.round(2 ** (-9)) + hiBandR.round(2 ** (-4));
 
-			// Select quantization: 8-bit linear, μ-law, o SBC
-			writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
-				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 8-bit
-				Latch.ar(muLawL, srTrigL),                          // μ-law
-				Latch.ar(writeL.round(0.5 ** bitDepthL), srTrigL),  // 12-bit (unused via μ-law)
-				dpcmReconL                                          // SBC (48kHz nativo, sin Latch)
+			// Quantization per mode. modeL/modeR is used DIRECTLY as the Select index,
+			// so the menu selection can never desync from the audio branch again.
+			//   0=8bit (restored from 2f85646)  1=12bit  2=SBC  3=mu-law
+			writeL = Select.ar(modeL, [
+				Latch.ar(writeL.round(0.5 ** 8),  srTrigL),  // 0: 8-bit  (ORIGINAL tuning)
+				Latch.ar(writeL.round(0.5 ** 12), srTrigL),  // 1: 12-bit
+				dpcmReconL,                                  // 2: SBC (48kHz nativo, sin Latch)
+				Latch.ar(muLawL, srTrigL)                    // 3: mu-law (22kHz)
 			]);
-			writeR = Select.ar(is8R + (is12R * 2) + (isAdpcmR * 3), [
-				Latch.ar(writeR.round(0.5 ** bitDepthR), srTrigR),
-				Latch.ar(muLawR, srTrigR),
-				Latch.ar(writeR.round(0.5 ** bitDepthR), srTrigR),
-				dpcmReconR                                          // SBC (48kHz nativo, sin Latch)
+			writeR = Select.ar(modeR, [
+				Latch.ar(writeR.round(0.5 ** 8),  srTrigR),
+				Latch.ar(writeR.round(0.5 ** 12), srTrigR),
+				dpcmReconR,
+				Latch.ar(muLawR, srTrigR)
 			]);
 			
 			BufWr.ar(writeL, bufL, ptrL); BufWr.ar(writeR, bufR, ptrR);
@@ -551,8 +565,8 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 		this.addCommand("flipR", "i", { |msg| synth_core.set(\flipR, msg[1]) });
 		this.addCommand("skipL", "i", { |msg| synth_core.set(\skipL, msg[1]) });
 		this.addCommand("skipR", "i", { |msg| synth_core.set(\skipR, msg[1]) });
-		this.addCommand("bitDepthL", "f", { |msg| synth_core.set(\bitDepthL, msg[1]) });
-		this.addCommand("bitDepthR", "f", { |msg| synth_core.set(\bitDepthR, msg[1]) });
+		this.addCommand("modeL", "i", { |msg| synth_core.set(\modeL, msg[1]) });
+		this.addCommand("modeR", "i", { |msg| synth_core.set(\modeR, msg[1]) });
 		this.addCommand("preampL", "f", { |msg| synth_core.set(\preampL, msg[1]) });
 		this.addCommand("preampR", "f", { |msg| synth_core.set(\preampR, msg[1]) });
 		this.addCommand("envSlewL", "f", { |msg| synth_core.set(\envSlewL, msg[1]) });

@@ -124,10 +124,9 @@ function Params.init(SC, G, _16n)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-     params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "SBC"}, 1)
+     params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "SBC", "μ-law"}, 1)
     params:set_action("bits"..s, function(x) 
-       local b = (x==1) and 8 or ((x==2) and 12 or 14)
-       SC.set_bitdepth(i,b) 
+       SC.set_mode(i, x-1)  -- 1..4 -> mode 0..3 (0=8bit 1=12bit 2=SBC 3=mu-law)
     end)
     
     params:add_option("coco"..num.."_out_mode", "Out Mode "..num, {"Envelope", "Audio"}, 1)
