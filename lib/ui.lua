@@ -215,14 +215,15 @@ function UI.draw_dest_inspector(G, id)
   end
   screen.stroke()
   
+  -- v3.00 Fase 3: la pista "E3: IN GAIN" de abajo se ha eliminado. El
+  -- control ya aparece en la cabecera ("E3 GAIN IN: <valor>"), asi que aqui
+  -- era redundante. Solo SKIP mantiene su pista, que informa de otra cosa.
   if id == 6 or id == 13 then
      local side = (id==6) and "L" or "R"
      local ch = params:get("stutter_chaos"..side)
      local rt = params:get("stutter_rate"..side)
      screen.level(4); screen.move(2, 62); screen.text("E1:CHS"); screen.level(15); screen.text(string.format("%.2f", ch or 0))
      screen.level(4); screen.move(60, 62); screen.text("E2:RATE"); screen.level(15); screen.text(string.format("%.3fs", rt or 0.1))
-  else
-     screen.level(4); screen.move(10, 62); screen.text("E3: IN GAIN")
   end
   
   UI.draw_popup(G)
