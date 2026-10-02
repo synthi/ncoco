@@ -153,7 +153,9 @@ function UI.draw_dest_inspector(G, id)
   end
   
   -- cabecera en UNA sola fila: titulo izquierda, "E3 GAIN IN: valor" derecha
-  screen.level(3)
+  -- nivel 8: mas brillante que las etiquetas (4) pero sin llegar al 15 de los
+  -- valores, para que el gain se lea sin competir con el nombre del destino.
+  screen.level(8)
   screen.move(126, 6); screen.text_right("E3 GAIN IN: "..string.format("%.2fx", G.dest_gains[id]))
   screen.level(15)
   screen.rect(BOX_X, BOX_Y, BOX_W, BOX_H); screen.stroke()
