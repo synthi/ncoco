@@ -1,4 +1,4 @@
--- lib/globals.lua v3.01
+-- lib/globals.lua v3.02
 -- CHANGELOG v3.01:
 -- 1. NEW: M.last_osc_time — marca del ultimo /update recibido de SC. La usa
 --    el detector de OSC parado en ncoco.lua. NO actua: solo registra.

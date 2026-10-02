@@ -1,4 +1,27 @@
--- ncoco.lua v3.01
+-- ncoco.lua v3.02
+-- CHANGELOG v3.02:
+-- 1. FIX: snapshots borrados por toques CORTOS y seguidos (el fallo "sin
+--    patron claro"). La corrutina de un toque VIEJA comparaba un sello
+--    COMPARTIDO por todos los toques; al despertar durante un toque NUEVO veia
+--    ese sello (distinto de 0) y borraba el snapshot aunque el toque durara
+--    milisegundos. Cada corrutina lleva ahora SU PROPIO sello. Mantener >1.6s
+--    sigue borrando igual: el gesto de borrado por diseño NO cambio.
+--    Test: tools/verify_p26_snap_taps.lua (16 toques reales en 4.8s,
+--    control negativo contra 45c06fd -> 6 fallos, 11 clear1 espurios).
+-- 2. FIX: K2/K3. Deberian ser REC COCO 1 / REC COCO 2 en la pantalla principal.
+--    Antes eran la MISMA linea (ponia recL y recR juntas), asi que K2 grababa
+--    los DOS cocos a la vez y K3 no hacia nada. Y el codigo se llegaba desde
+--    DOS popups (fuentes 7..10 y destinos que no son SKIP), que no tenian
+--    return: K2 "grababa" con el inspector abierto.
+--    Test: tools/verify_p27_keys.lua (ejecuta key() real; control negativo
+--    contra ee0ba94 -> 6 fallos, exactamente el sintoma reportado).
+-- 3. FIX: inspector de SKIP. El titulo es SIEMPRE la etiqueta de la pagina
+--    ("SKIP 1", no "SKIP 1: SINGLE") y el modo se muestra aparte como
+--    "K2/K3: SINGLE". La pista "K2/3: MODE" se elimino porque a y=55 tocaba el
+--    borde de la caja del scope (acaba en y=50).
+-- 4. FIX: release de una tecla sin press previo hacia "util.time() - nil" ->
+--    error de aritmetica dentro de la rejilla.
+-- 5. VERSION: todo el proyecto pasa a 3.02.
 -- v3.01 — UNIFICACIÓN DE VERSIONES. Antes cada archivo llevaba su propio
 --   "vN.NN" y el banner del script quedó en v2.14 durante toda la v3.00: no
 --   había una única fuente de verdad. Desde v3.01 TODOS los archivos del
@@ -69,7 +92,7 @@ engine.name = 'Ncoco'
 -- [v3.01] Version centralizada. Antes cada archivo llevaba su "vN.NN" y el
 -- banner del script se quedo en v2.14 durante toda la v3.00: no habia una
 -- unica fuente de verdad. Esto es lo que se muestra al arrancar.
-local NCOCO_VERSION = "3.01"
+local NCOCO_VERSION = "3.02"
 
 local function safe_include(name)
   local ok, result = pcall(include, name)
@@ -786,10 +809,19 @@ function key(n,z)
     elseif G.focus.edit_r then 
        if n==3 then local v=params:get("bitsR"); params:set("bitsR", (v%4)+1) end
     else 
-       if n==2 then 
-         local v = 1 - params:get("recL")
-         params:set("recL", v); params:set("recR", v)
-       end 
+       -- [v3.02] SOLO en la pantalla principal. Mismo criterio que redraw():
+       -- si hay un popup de fuente o de destino abierto, K2/K3 son la
+       -- funcion de ESA pantalla, no REC.
+       -- Antes las dos grabaciones eran la MISMA linea: K2 ponia recL y recR
+       -- JUNTAS (grababa COCO 1 y 2 a la vez) y K3 no hacia nada.
+       local in_popup = (G.focus.source ~= nil) or (G.focus.inspect_dest ~= nil)
+       if not in_popup then
+          if n == 2 then
+             params:set("recL", 1 - params:get("recL"))     -- K2 -> COCO 1
+          elseif n == 3 then
+             params:set("recR", 1 - params:get("recR"))     -- K3 -> COCO 2
+          end
+       end
     end
   end
 end

@@ -1,4 +1,4 @@
--- lib/ui.lua v3.01
+-- lib/ui.lua v3.02
 -- CHANGELOG v3.01:
 -- 1. FIX: draw_main leia G.sources_val[7] y [8] SIN el `or 0` que usa el resto
 --    del archivo. Un nil tumbaba el redraw de pantalla entero.
@@ -141,10 +141,15 @@ end
 function UI.draw_dest_inspector(G, id)
   local title = DST_NAMES[id] or "DEST"
 
-  if id == 6 or id == 13 then
+  -- [v3.02] El titulo es SIEMPRE la etiqueta de la pagina (DST_NAMES), sin el
+  -- modo. Antes decia "SKIP 1: SINGLE"; el autor lo quiere como en la pagina:
+  -- "SKIP 1", con el modo aparte como "K2/K3: SINGLE".
+  local is_skip = (id == 6 or id == 13)
+  local mode_txt = nil
+  if is_skip then
      local side = (id==6) and "L" or "R"
      local mode = params:get("skip_mode"..side)
-     title = "SKIP "..(side=="L" and "1" or "2")..": "..(mode==1 and "SINGLE" or "AUTO")
+     mode_txt = "K2/K3: " .. ((mode==1) and "SINGLE" or "AUTO")
   end
 
   -- v3.00 Fase 3: caja del scope ampliada y cabecera compacta en UNA fila.
@@ -168,14 +173,20 @@ function UI.draw_dest_inspector(G, id)
   -- etiqueta a nivel 6 (antes 3, se perdia contra el fondo) y valor a nivel 12
   -- (antes 8, se leia apagado; 12 es brillante sin competir con el 15 de los
   -- valores principales).
-  -- El titulo mas largo es el de SKIP ("SKIP 2: SINGLE"), que acaba en x=64, y
-  -- la etiqueta "E3 GAIN IN:" empieza en x=43: se solaparian. Por eso SKIP va
-  -- sin etiqueta de gain (medido con norns.ttf@8).
+  -- El titulo mas largo es el de SKIP ("AUD IN 2", 37 px) y la etiqueta
+  -- "E3 GAIN IN:" (47 px) con text_right en x=90 empieza en x=43: el titulo
+  -- acaba en x=40, asi que quedan 3 px. SKIP no lleva esa etiqueta porque en su
+  -- lugar muestra "K2/K3: <modo>" (ver abajo). Anchos medidos con norns.ttf@8.
   local gain_txt = string.format("%.2fx", G.dest_gains[id])
-  if id ~= 6 and id ~= 13 then
-     screen.level(6); screen.move(90, 6); screen.text_right("E3 GAIN IN:")
+  if is_skip then
+     -- SKIP: etiqueta de pagina + modo que cambian K2/K3 + gain, en UNA fila.
+     -- Anchos medidos con norns.ttf@8: "SKIP 1"=31, "K2/K3: SINGLE"=59,
+     -- "2.00x"=21. Titulo en x=3 (3..34); K2/K3 con text_right en x=99
+     -- (40..99) y gain en x=126 (105..126): 6 px de hueco a cada lado.
+     screen.level(6); screen.move(99, 6); screen.text_right(mode_txt)
      screen.level(12); screen.move(126, 6); screen.text_right(gain_txt)
   else
+     screen.level(6); screen.move(90, 6); screen.text_right("E3 GAIN IN:")
      screen.level(12); screen.move(126, 6); screen.text_right(gain_txt)
   end
   screen.level(15)

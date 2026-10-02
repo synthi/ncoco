@@ -1,4 +1,4 @@
--- lib/storage.lua v3.01
+-- lib/storage.lua v3.02
 -- v3.01 (continúa la FASE 4): BUG DEL SECUENCIADOR.
 -- Storage.load hacia `G.sequencers = data.sequencers`, pero run_sequencer()
 -- capturo `local s = G.sequencers[id]` al arrancar y guarda esa referencia.

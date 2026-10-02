@@ -1,4 +1,4 @@
--- lib/grid_nav.lua v3.01
+-- lib/grid_nav.lua v3.02
 -- v3.01 (continúa la FASE 4 del congelado del grid):
 -- 0. FIX: el clock.run del jack (0.8s) hacia G.patch[G.focus.source][obj.id]
 --    al despertar. Si G.focus.source se volvia nil entre medias (soltar la

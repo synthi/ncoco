@@ -1,4 +1,4 @@
--- v3.01: unificación de versiones + el fallo de ipairs en cleanup().
+-- v3.02: los números de versión y el cambio de versión en caliente.
 -- Dos cosas quedan guardadas aquí:
 --   1. Todos los archivos declaran la MISMA versión (antes cada uno iba por su
 --      cuenta y el banner del script quedó en v2.14 durante toda la v3.00).
@@ -12,7 +12,7 @@ local function check(name, cond, detail)
   else print("  FALLA " .. name .. (detail and ("  -- " .. detail) or "")); fails = fails + 1 end
 end
 
-local VERSION = "3.01"
+local VERSION = "3.02"
 
 local files = {
   "ncoco.lua",
@@ -35,7 +35,7 @@ for _, path in ipairs(files) do
   else
     local first = f:read('*l') or ""
     f:close()
-    -- Acepta "-- lib/x.lua v3.01", "-- ncoco.lua v3.01" y "// x.sc v3.01".
+    -- Acepta "-- lib/x.lua v3.02", "-- ncoco.lua v3.02" y "// x.sc v3.02".
     check("cabecera de " .. path,
           first:match("v" .. VERSION .. "%s*$") ~= nil,
           "cabecera: " .. first)
