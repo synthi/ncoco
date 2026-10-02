@@ -1,4 +1,4 @@
--- lib/16n.lua v3.02
+-- lib/16n.lua v3.03
 -- NOTA v3.01: SOLO se actualizó la etiqueta de versión (unificación del
 --   proyecto). El CÓDIGO de este archivo NO se tocó: sigue fuera de alcance
 --   sin prueba en hardware. Ver docs/BIT_MODES_FINDINGS.md §6.

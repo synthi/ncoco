@@ -1,5 +1,36 @@
--- ncoco.lua v3.02
--- CHANGELOG v3.02:
+-- ncoco.lua v3.03
+-- CHANGELOG v3.03 (FALSA ALARMA DEL LATIDO + PARPADEO DEL GRID):
+-- 1. FIX: v3.02 disparaba "GRID RECOVERY (sin redraw)" sobre una rejilla SANA.
+--    Visto en maiden: "sin redraw desde hace 4.7s -> recuperando" y luego otra
+--    vez a 3.2s; el grid parpadeo pero siguio funcionando. CAUSA VERIFICADA en
+--    norns matron/src/events.cc: hay UN SOLO event_loop() con UNA sola cola
+--    FIFO, y w_handle_metro() y w_handle_clock_resume() llaman al MISMO estado
+--    Lua (lvm). Metro y latido estan SERIALIZADOS: si cualquier manejador de
+--    Lua se bloquea N segundos se paran LOS DOS, y al reanudarse el latido
+--    mide util.time() (reloj de pared) frente a un last_redraw de ANTES del
+--    bloqueo. Ve N segundos y decide "congelado" cuando en realidad se trataba
+--    de un bloqueo transitorio del bucle, del que la rejilla se recuperaba sola
+--    en el siguiente tick.
+-- 2. FIX: el latido mide ahora SU PROPIO atraso (late). late >= 1s prueba que
+--    el cuello es el bucle de Lua entero y NO la rejilla => se informa y NO se
+--    toca la rejilla. Con el latido puntual, la decision exige DOS avisos
+--    separados por un ciclo entero antes de recuperar. La logica esta en
+--    GridNav.heartbeat_step(), funcion pura y testeada.
+-- 3. NEW: grid_ticks, contador de ticks de metro. El mensaje de maiden lleva ya
+--    la prueba en vez de una sospecha: "+0 ticks" = el metro no disparo;
+--    ">0 ticks" = el redraw no llega a terminar.
+-- 4. FIX: PARPADEO. recover_grid() hacia g:all(0): apagaba los 128 LEDs y el
+--    siguiente tick los repintaba (~67ms). Era EL FLASH. Verificado en
+--    matron/src/device/device_monome.cc, dev_monome_grid_set_led(): se marca
+--    md->dirty[q] = true SIN comparar el valor, asi que reset_cache() (-1 en
+--    las 128 celdas) ya fuerza el reenvio completo de los 4 quads en el
+--    siguiente redraw, sin el frame en negro. Ademas la rejilla CONSERVA su
+--    imagen durante una congelacion real en vez de quedarse apagada.
+-- 5. TEST: tools/verify_p28_heartbeat.lua (4 escenarios + control negativo que
+--    demuestra que la regla de v3.02 si disparaba recuperacion en el caso
+--    transitorio).
+-- 6. VERSION: todo el proyecto pasa a 3.03.
+-- v3.02 — UNIFICACIÓN DE VERSIONES. Antes cada archivo llevaba su propio
 -- 1. FIX: snapshots borrados por toques CORTOS y seguidos (el fallo "sin
 --    patron claro"). La corrutina de un toque VIEJA comparaba un sello
 --    COMPARTIDO por todos los toques; al despertar durante un toque NUEVO veia
@@ -92,7 +123,7 @@ engine.name = 'Ncoco'
 -- [v3.01] Version centralizada. Antes cada archivo llevaba su "vN.NN" y el
 -- banner del script se quedo en v2.14 durante toda la v3.00: no habia una
 -- unica fuente de verdad. Esto es lo que se muestra al arrancar.
-local NCOCO_VERSION = "3.02"
+local NCOCO_VERSION = "3.03"
 
 local function safe_include(name)
   local ok, result = pcall(include, name)
@@ -356,9 +387,18 @@ end
 --      convierte cada g:led en un no-op silencioso, vport.lua).
 --      GridNav.find_device_port() escanea los 4 vports y devuelve el que SI tiene
 --      dispositivo; aqui se reengancha.
---   2. REENVIO COMPLETO FORZADO. dev_monome_all_led (device_monome.cc) marca
---      dirty en TODOS los quads SIN comparar el valor, asi que all()+refresh
---      garantiza un reenvio que el cache diferencial de Lua no puede bloquear.
+--   2. REENVIO COMPLETO SIN APAGAR (v3.03). Antes esto era g:all(0)+g:refresh():
+--      mandaba TODOS los LEDs a 0 y el siguiente tick los repintaba. Ese frame
+--      en negro ES el parpadeo que delato la falsa alarma del latido.
+--      Verificado en matron/src/device/device_monome.cc, dev_monome_grid_set_led():
+--         md->dirty[q] = true;    // se marca SIN mirar el valor anterior
+--      Asi que GridNav.reset_cache() (-1 en las 128 celdas) hace que el
+--      siguiente redraw reescriba TODAS y deje los 4 quads sucios: el
+--      refresh() que cierra GridNav.redraw() manda el mapa completo. Mismo
+--      reenvio garantizado, cero frame en negro, y durante una congelacion real
+--      la rejilla CONSERVA su imagen en vez de quedarse apagada esperando.
+--      Prueba empirica: reset_cache() solo ya se dispara cada 75 frames (5 s)
+--      desde v2.04 y nunca ha parpadeado.
 --   3. REINICIO DEL METRO. Metro:start() REUSA el mismo id (metro.lua: solo
 --      metro.init() consume de Metro.available), asi que no hay fuga de ids.
 --      Se hace fuera del propio callback (en el sistema clock) para no
@@ -378,7 +418,8 @@ local function recover_grid(reason)
       g = grid.connect(port)
       print("  -> reenganchado a vport " .. port)
    end
-   if g.device then g:all(0); g:refresh() end
+   -- [v3.03] SIN g:all(0): era eso lo que parpadeaba (ver comentario arriba).
+   -- reset_cache() solo ya fuerza el reenvio completo en el proximo tick.
    GridNav.reset_cache()
    if grid_recover_cid then clock.cancel(grid_recover_cid) end
    grid_recover_cid = clock.run(function()
@@ -461,6 +502,10 @@ function init()
 
     grid_metro = metro.init(); grid_metro.time = 1/15
     local grid_error_count = 0
+    -- [v3.03] EVIDENCIA para el latido: ticks de metro realmente disparados.
+    -- Con "+0 ticks" el metro no corrio; con "ticks > 0" el redraw no termino.
+    -- Antes el latido solo podia decir "sin redraw" y adivinar el porque.
+    local grid_ticks = 0
     -- [v3.00] WATCHDOG: el congelado del grid NO era un error de Lua, era que
     -- los valores dejaba de llegar. /update viene de SuperCollider via OSC; si
     -- ese hilo muere (SC se cuelga, el motor se cae), sources_val se queda con
@@ -473,6 +518,7 @@ function init()
     local osc_watch_start = util.time()
     local osc_never_warned = false
     grid_metro.event = function()
+       grid_ticks = grid_ticks + 1
        local ok, err = pcall(GridNav.redraw, G, g)
        if not ok then
           grid_error_count = grid_error_count + 1
@@ -511,34 +557,78 @@ function init()
     end
     grid_metro:start()
 
-    -- [v3.01] LATIDO / HEARTBEAT. Antes solo imprimia; ahora ACTUA cuando el
-    -- estado implica congelacion SEGURA (sin falsos positivos posibles):
-    --   - sin redraw >3 s  => el metro del grid dejo de disparar (o Lua falla
-    --     a mitad de redraw). La rejilla esta congelada de hecho: recuperar es
-    --     obligatorio, y un parpadeo de un frame es irrelevante frente a eso.
-    --   - g.device = nil => los g:led/g:refresh son no-ops silenciosos
-    --     (vport.lua): los LEDs tampoco llegan. Se reengancha el vport.
+    -- [v3.01/v3.03] LATIDO / HEARTBEAT.
+    --
+    -- V3.02 disparo RECOVERY sobre una rejilla SANA (visto en maiden: dos avisos
+    -- "sin redraw 4.7s" / "3.2s" y el grid parpadeo, pero siguio funcionando).
+    -- Por que paso, VERIFICADO en matron/src/events.cc: hay UN SOLO event_loop()
+    -- con UNA sola cola FIFO, y w_handle_metro() y w_handle_clock_resume()
+    -- llaman al MISMO estado Lua (lvm) => metro y latido estan SERIALIZADOS.
+    -- Si cualquier manejador de Lua se bloquea N segundos se paran LOS DOS, y al
+    -- reanudarse el latido mide con util.time() (reloj de pared) frente a un
+    -- last_redraw de ANTES del bloqueo: ve N s y decide "congelado". Recuperar
+    -- ahi mandaba g:all(0) = APAGAR una rejilla que estaba viva. Ese era el
+    -- parpadeo.
+    --
+    -- v3.03 separa los dos casos con dos pruebas independientes y exige DOS
+    -- avisos (GridNav.heartbeat_step, test en tools/verify_p28_heartbeat.lua):
+    --   block   : el latido llego tarde => se bloqueo el bucle ENTERO. Solo
+    --             informa, NO toca la rejilla (se cura sola y tocarla parpadea).
+    --   warn    : latido puntual + metro sin disparar => aviso 1/2, nada mas.
+    --   recover : igual un ciclo entero despues => ahi si se recupera.
+    -- El contador grid_ticks (metro) da la prueba en el mensaje: "+0 ticks" es
+    -- el metro muerto, ">0" es un redraw que no llega a terminar.
     -- El latido vive en el sistema clock (aparte del metro), asi que sigue
-    -- disparando aunque el metro este muerto. NO es un parche a ciegas: solo se
-    -- dispara ante esos dos estados, que por si mismos ya son el fallo.
+    -- disparando aunque el metro este muerto.
     local grid_boot = util.time()
+    local hb_pending = nil          -- instante del aviso 1/2 de "sin redraw"
+    local hb_pending_dev = nil      -- instante del aviso 1/2 de "g.device nil"
     local cid_heartbeat = clock.run(function()
+       local t0 = util.time()       -- inicio de ESTE ciclo
        while true do
           clock.sleep(2.0)
+          local now = util.time()
+          -- Atraso real de este despertar. ~0 en un bucle sano; grande si el
+          -- bucle de Lua se bloqueo mientras dormiamos (ahi NO se recupera).
+          local late = (now - t0) - 2.0
+          if late < 0 then late = 0 end
+          t0 = now
+          local ticks_seen = grid_ticks
+          grid_ticks = 0
+
           local last = GridNav.last_redraw
           local ref = (last and last > 0) and last or grid_boot
-          if (util.time() - ref) > 3.0 then
-             print("GRID HEARTBEAT: sin redraw desde hace " ..
-                   string.format("%.1f", util.time() - ref) .. "s -> recuperando")
-             recover_grid("sin redraw")
+          local stall = now - ref
+
+          local action, msg = GridNav.heartbeat_step(stall, late, ticks_seen, hb_pending, now)
+          if action == "ok" then
+             hb_pending = nil
+          else
+             if action == "warn" then hb_pending = now end
+             if action == "recover" then hb_pending = nil end
+             print(msg)
+             if action == "recover" then recover_grid("sin redraw x2") end
           end
+
+          -- g.device = nil => los g:led/g:refresh son no-ops silenciosos
+          -- (vport.lua): los LEDs tampoco llegan. Tambien exige 2 avisos: el
+          -- reenganche USB puede ser transitorio y no debe apagar la rejilla.
           if not g.device then
              if grid_was_attached then
-                print("GRID HEARTBEAT: g.device = nil (LEDs no llegan) -> recuperando")
-                recover_grid("g.device nil")
+                if hb_pending_dev then
+                   if (now - hb_pending_dev) >= GridNav.HEART_CONFIRM then
+                      hb_pending_dev = nil
+                      print("GRID HEARTBEAT: g.device = nil (LEDs no llegan) tras 2 avisos -> recuperando")
+                      recover_grid("g.device nil x2")
+                   end
+                else
+                   hb_pending_dev = now
+                   print("GRID HEARTBEAT: g.device = nil (LEDs no llegan) -> aviso 1/2 (NO recupero aun)")
+                end
              end
           else
              grid_was_attached = true
+             hb_pending_dev = nil
           end
        end
     end)

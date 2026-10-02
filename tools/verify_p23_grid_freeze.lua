@@ -14,6 +14,12 @@
 --   Por eso ahora, ademas de detectar, se RECUPERA en caliente rehaciendo lo que
 --   un reinicio de norns le hace a la rejilla (verificado en lua/core/script.lua:
 --   Script.clear -> grid.cleanup() = dev:all(0)+dev:refresh() y metro.free_all()).
+--
+-- v3.03 (falsa alarma): ese reenvio ya NO empieza con g:all(0). El latido llego
+--   a "recuperar" sobre una rejilla SANA porque en matron/src/events.cc metro y
+--   latido comparten UNA cola FIFO: un bloqueo de Lua para a los dos y al
+--   reanudarse el latido ve el tiempo del bloqueo como "sin redraw". Recuperar
+--   ahi mandaba g:all(0) = apagar una rejilla viva. Ver verify_p28_heartbeat.
 
 local fails = 0
 local function check(name, cond, detail)
@@ -63,13 +69,20 @@ print("3. Recuperacion en caliente del grid (recover_grid)")
 check("esta definida", ncoco:match('local function recover_grid'))
 check("se expone a maiden para el caso no detectable",
       ncoco:match('_G%.recover_grid%s*=%s*function'))
-check("fuerza reenvio completo (all + refresh)",
-      ncoco:match('g:all%(0%); g:refresh%(%)'))
+check("fuerza reenvio completo con reset_cache", ncoco:match('GridNav%.reset_cache%(%)'))
+-- v3.03: apagar la rejilla para reenviarla era EL PARPADEO que delato la falsa
+-- alarma del latido. dev_monome_grid_set_led marca dirty SIN comparar el valor,
+-- asi que reset_cache() (-1 en las 128 celdas) ya fuerza el reenvio completo.
+check("NO apaga la rejilla (sin g:all(0) en codigo)",
+      not ncoco_code:match('g:all%(0%)'),
+      "g:all(0) mandaba los 128 LEDs a 0 y era el flash")
 check("reinicia el metro (stop/start reusa id, sin fuga)",
       ncoco:match('grid_metro:stop%(%); grid_metro:start%(%)'))
 check("reengancha el vport con dispositivo", ncoco:match('GridNav%.find_device_port%(%)'))
-check("se dispara sola ante 'sin redraw'", ncoco:match('recover_grid%("sin redraw"%)'))
-check("se dispara sola ante 'g.device nil'", ncoco:match('recover_grid%("g.device nil"%)'))
+check("se dispara sola ante 'sin redraw' (y exige 2 avisos)",
+      ncoco:match('recover_grid%("sin redraw x2"%)'))
+check("se dispara sola ante 'g.device nil' (y exige 2 avisos)",
+      ncoco:match('recover_grid%("g.device nil x2"%)'))
 check("el pcall de redraw usa recover_grid (no un all(0) suelto)",
       ncoco:match('recover_grid%("redraw error x10"%)'))
 

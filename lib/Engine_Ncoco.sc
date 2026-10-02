@@ -1,4 +1,4 @@
-// Engine_Ncoco.sc v3.02
+// Engine_Ncoco.sc v3.03
 // v3.01: SOLO se actualizó la etiqueta de versión (unificación del proyecto).
 //   El CÓDIGO del motor NO se tocó en v3.01.
 // v3.00 FASE 2 - BIT MODES: single per-mode selector (see BIT_MODES_FINDINGS.md).

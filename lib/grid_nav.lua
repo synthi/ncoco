@@ -1,4 +1,14 @@
--- lib/grid_nav.lua v3.02
+-- lib/grid_nav.lua v3.03
+-- v3.03 (LATIDO deja de dar falsas alarmas):
+-- 0. NEW: GridNav.heartbeat_step() — la decision del latido, sacada a una
+--    funcion PURA para poder testearla sin simular clock ni metro.
+-- 1. DIAGNOSTICO: el latido ahora mide TAMBIEN su propio atraso. Verificado en
+--    matron/src/events.cc: UN solo event_loop(), UNA sola cola FIFO, y tanto
+--    w_handle_metro como w_handle_clock_resume llaman al MISMO estado Lua.
+--    Metro y latido estan SERIALIZADOS => un bloqueo de N s para a los dos, y
+--    al reanudarse el latido ve N s de "sin redraw" en una rejilla que estaba
+--    viva. Esa era la falsa alarma de v3.02.
+-- 2. Dos avisos antes de recuperar: una parada transitoria nunca apaga la rejilla.
 -- v3.01 (continúa la FASE 4 del congelado del grid):
 -- 0. FIX: el clock.run del jack (0.8s) hacia G.patch[G.focus.source][obj.id]
 --    al despertar. Si G.focus.source se volvia nil entre medias (soltar la
@@ -102,6 +112,67 @@ function GridNav.reset_cache()
      end 
   end
 end
+
+-- [v3.03] UMBRALES del latido (segundos).
+GridNav.HEART_STALL   = 3.0   -- sin redraw durante esto => hay congelacion
+GridNav.HEART_LATE    = 1.0   -- atraso del PROPIO latido => el bucle se bloqueo
+GridNav.HEART_CONFIRM = 2.0   -- un ciclo de latido entre aviso y recuperacion
+
+--- [v3.03] Decision del latido. FUNCION PURA: entra medicion, sale que hacer.
+-- No toca la rejilla, no imprime, no usa reloj. Asi el test fabrica cada caso
+-- sin tener que simular clock ni metro.
+--
+-- POR QUE HACE FALTA (verificado en norns, no supuesto):
+--   matron/src/events.cc tiene UN SOLO event_loop() que drena UNA cola FIFO, y
+--   w_handle_metro() y w_handle_clock_resume() llaman al MISMO estado Lua
+--   (lvm). Metro y latido estan, por tanto, SERIALIZADOS: si cualquier
+--   manejador de Lua tarda N segundos se paran LOS DOS a la vez. Al
+--   reanudarse, el latido mide util.time() (reloj de pared) frente a
+--   last_redraw de ANTES del bloqueo y ve N segundos, aunque la rejilla se vaya
+--   a recuperar sola en el siguiente tick de metro.
+--   Recuperar ahi era la falsa alarma de v3.02: "GRID RECOVERY" mandaba
+--   g:all(0) y apagaba una rejilla que estaba perfectamente viva (el parpadeo
+--   que delato el problema).
+--
+-- La prueba que separa los dos casos es el ATRASO PROPIO del latido, que NO
+-- depende del metro:
+--   late >= HEART_LATE  => el bucle ENTERO se bloqueo => informar, NO tocar.
+--                          Se cura solo y tocarlo solo genera el parpadeo.
+--   late pequeño + stall grande => el metro si murio => 2 avisos y recuperar.
+--
+-- @tparam number stall  segundos desde el ultimo redraw terminado
+-- @tparam number late   atraso real de ESTE despertar (>=0)
+-- @tparam number ticks  ticks de metro vistos desde el ciclo anterior
+-- @tparam number|nil pending  instante del aviso 1/2 (nil si no lo hay)
+-- @tparam number now    instante actual
+-- @treturn string  "ok" | "block" | "warn" | "recover"
+-- @treturn string|nil mensaje para maiden (nil cuando la accion es "ok")
+function GridNav.heartbeat_step(stall, late, ticks, pending, now)
+   if stall <= GridNav.HEART_STALL then
+      return "ok"                        -- la rejilla esta latiendo: nada que ver
+   end
+   if late >= GridNav.HEART_LATE then
+      -- El latido NO depende del metro y aun asi llego tarde: el cuello es el
+      -- bucle de Lua entero, no la rejilla. Recuperar aqui solo la apagaria.
+      return "block", string.format(
+         "GRID HEARTBEAT: sin redraw %.1fs PERO el latido llego %.1fs tarde"
+         .. " => el bucle de Lua se bloqueo (metro y latido parados juntos,"
+         .. " metro +%d ticks). Se recupera solo; NO se toca la rejilla.",
+         stall, late, ticks or 0)
+   end
+   -- Latido puntual: el metro concreto es el que no dispara. Dos avisos.
+   if pending and (now - pending) >= GridNav.HEART_CONFIRM then
+      return "recover", string.format(
+         "GRID HEARTBEAT: sin redraw %.1fs tras 2 avisos con el latido puntual"
+         .. " (metro +%d ticks) => recuperando",
+         stall, ticks or 0)
+   end
+   return "warn", string.format(
+      "GRID HEARTBEAT: sin redraw %.1fs, latido puntual, metro +%d ticks"
+      .. " -> aviso 1/2 (NO recupero aun)",
+      stall, ticks or 0)
+end
+
 
 -- [v3.01] Devuelve el indice del vport (1..4) que SI tiene un dispositivo
 -- fisico enganchado, o nil si ninguno. Sirve para RECUPERAR la rejilla cuando

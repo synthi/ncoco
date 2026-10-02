@@ -1,7 +1,11 @@
--- v3.02: los números de versión y el cambio de versión en caliente.
+-- Versiones unificadas + cambio de versión en caliente.
+-- (El nombre "v302" del archivo es historial: lo que comprueba aquí es que TODOS
+--  los archivos declaren LA MISMA versión, la que NCOCO_VERSION indique.)
 -- Dos cosas quedan guardadas aquí:
 --   1. Todos los archivos declaran la MISMA versión (antes cada uno iba por su
 --      cuenta y el banner del script quedó en v2.14 durante toda la v3.00).
+--      El valor de abajo se cambia A MANO a propósito: es el recordatorio de que
+--      cada cambio lleva versión nueva (regla desde v3.01).
 --   2. cleanup() recorre clock_ids con pairs. Esa tabla es DISPERSA (1..5 y 7),
 --      así que ipairs se detendría en el hueco y el latido nunca se cancelaría.
 --      Es la MISMA trampa que rompió el 16n con midi.devices.
@@ -12,7 +16,7 @@ local function check(name, cond, detail)
   else print("  FALLA " .. name .. (detail and ("  -- " .. detail) or "")); fails = fails + 1 end
 end
 
-local VERSION = "3.02"
+local VERSION = "3.03"
 
 local files = {
   "ncoco.lua",

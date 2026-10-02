@@ -1,6 +1,6 @@
 ---
 
-## 0. TL;DR — las 10 reglas que más caro salen
+## 0. TL;DR — las 11 reglas que más caro salen
 
 
 1. **SC se lee de arriba abajo.** No hay hoisting, no hay `if` en tiempo de ejecución.
@@ -19,6 +19,9 @@
 9. **`include()` tiene caché por ruta.** Incluir dos veces = la **misma** tabla.
 10. **El archivo del engine debe llamarse exactamente como `engine.name`.**
     Dos copias = error `DUPLICATE ENGINES` al cargar.
+11. **`metro` y `clock` son el MISMO hilo.** Un watchdog que dice «el otro no me
+    ha contestado en N s» **no puede** distinguir «el otro se rompió» de «los dos
+    nos quedamos sin CPU». Mide **tu propio atraso**: es la única prueba.
 
 ---
 
@@ -571,8 +574,7 @@ Un reinicio de script, en lo que a la rejilla toca, ejecuta `Script.clear()`
 ```lua
 local port = GridNav.find_device_port()      -- escanea Grid.vports[1..4].device
 if port and g ~= grid.connect(port) then g = grid.connect(port) end
-if g.device then g:all(0); g:refresh() end   -- reenvío forzado: all() marca dirty todo
-GridNav.reset_cache()
+GridNav.reset_cache()                         -- reenvío forzado, SIN apagar (ver abajo)
 grid_metro:stop(); grid_metro:start()        -- start() REUSA el id: sin fuga
 ```
 
@@ -580,11 +582,71 @@ grid_metro:stop(); grid_metro:start()        -- start() REUSA el id: sin fuga
   `Grid.update_devices()`. **Hay que ESCANEAR los 4 vports**: si el aparato
   reengancha con otro nombre queda en otro vport y el 1 se queda sin `.device`
   (y entonces `g:led`/`g:refresh` son **no-ops silenciosos**, `vport.lua`).
-- `g:all(val)` marca dirty en TODOS los quads **sin comparar el valor**
-  (`device_monome.cc`), así que fuerza un reenvío que el cache diferencial de Lua
-  no puede bloquear.
+- `g:led()` marca su quad dirty **sin comparar el valor** (`device_monome.cc`), así
+  que poner la caché a `-1` hace que el siguiente redraw **reescriba las 128
+  celdas** y deje los 4 quads sucios. `reset_cache()` **basta** para un reenvío
+  completo.
+- **No uses `g:all(0)` para "forzar" el reenvío.** Sí marca todo dirty, pero
+  también **manda los 128 LEDs a 0**: la rejilla se apaga hasta el siguiente
+  tick (67 ms a 15 Hz). Ese es el **destello**. Es redundante *y* destructivo.
 - Ncoco expone `>> recover_grid()` a maiden para el congelado que **no** se puede
   detectar desde Lua (capa serial/USB de monome).
+
+### 6.7 `metro` y `clock` son el MISMO hilo — el watchdog que miente
+
+Verificado en `matron/src/events.cc`:
+
+- hay **un solo `event_loop()`**, que drena **una sola cola FIFO**;
+- `w_handle_metro()` (ticks de `metro`) y `w_handle_clock_resume()` (despertares
+  de `clock`) llaman **al mismo estado Lua** (`lvm`).
+
+Consecuencia práctica: **están serializados.** Si un manejador de Lua tarda N
+segundos, se paran los dos a la vez; al reanudarse, todos los eventos pendientes
+se procesan de golpe.
+
+Por eso este patrón —tan natural como falso— **miente**:
+
+```lua
+-- MAL: parece que vigila el metro, pero en realidad vigila "el reloj".
+local last = mi_metronometro          -- lo escribe el evento del metro
+clock.run(function()                 -- un watchdog "independiente"...
+  while true do
+    clock.sleep(2.0)
+    if util.time() - last > 3.0 then recover() end   -- ...que no lo es
+  end
+end)
+```
+
+Si el bucle se bloquea 5 s, el watchdog ve 5 s y "recupera" algo que no estaba
+roto. Y si la recuperación **apaga** la rejilla (como `g:all(0)`), el propio
+watchdog **falla en abierto**: el destructivo es su propia acción correctora.
+
+**La prueba que sí funciona: mide tu propio atraso.**
+
+```lua
+local t0 = util.time()
+while true do
+  clock.sleep(2.0)
+  local now = util.time()
+  local late = (now - t0) - 2.0        -- ~0 si el bucle está sano
+  t0 = now
+  if late >= 1.0 then
+    -- el bucle ENTERO se bloqueó: el otro sistema tampoco corría.
+    report("se bloqueó Lua %.1fs; no toco nada") late
+  elseif (now - last) > 3.0 then
+    -- el latido fue puntual y aun así no hay redraw: ahí sí es el otro.
+    report("el metro no dispara; recuperando")
+  end
+end
+```
+
+`late` grande **prueba** el bloqueo global (un watchdog que no depende del metro
+no puede llegar tarde si no se paró todo); `late` pequeño con el otro sistema
+muerto **prueba** que el fallo es del otro. Y aun así, exige **dos detecciones
+seguidas** antes de actuar: una parada transitoria no debe costar un destello.
+
+ncoco lo tiene en `lib/grid_nav.lua` → `GridNav.heartbeat_step()` (función pura,
+testeable sin reloj) y `tools/verify_p28_heartbeat.lua`.
 
 ---
 
@@ -705,6 +767,7 @@ serializar**.
 | `unpack` es nil | Lua 5.3, usa `table.unpack` | global |
 | Ruido/click al cambiar un parámetro | Falta `.lag` o `.slew` en el control | SC, no Lua |
 | El engine se siente "lento" | Barato de datos o demasiado trabajo por frame | §3.10 y caché del grid |
+| La rejilla **parpadea y sigue funcionando bien** | Un watchdog que "recuperaba" sin medir su propio atraso: vio el tiempo de un bloqueo de Lua como si fuera fallo del grid | §6.7 |
 
 ---
 

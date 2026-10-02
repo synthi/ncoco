@@ -1,4 +1,4 @@
--- lib/sc_utils.lua v3.02
+-- lib/sc_utils.lua v3.03
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:

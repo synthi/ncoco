@@ -783,18 +783,22 @@ a `grid.cleanup()` —que por dispositivo hace `dev:all(0); dev:refresh()`— y 
 
 1. **Reengancha el vport con dispositivo.** `GridNav.find_device_port()` escanea
    los 4 vports (`grid.lua`) y devuelve el que tiene `.device`.
-2. **Fuerza reenvío completo** con `g:all(0); g:refresh()`. `all()` marca dirty
-   en todos los quads sin comparar valor, así que el cache diferencial de Lua
-   **no puede** bloquear el reenvío.
+2. **Fuerza reenvío completo** con `GridNav.reset_cache()`, y **ya sin apagar**
+   (esto cambió en v3.03, ver §17.1). Poner la caché a `-1` fuerza a que las 128
+   celdas se reescriban; y como `g:led()` marca dirty **sin comparar el valor**,
+   los 4 quads quedan sucios y el `refresh()` que cierra `redraw()` los manda
+   todos. Mismo reenvío garantizado que daba `g:all(0)`, sin el frame en negro.
 3. **Reinicia el metro** (`grid_metro:stop(); grid_metro:start()`). `Metro:start()`
    reusa el mismo id (solo `metro.init()` consume de `Metro.available`): **sin
    fuga de ids**. Se hace fuera del propio callback, en el sistema `clock`.
 
-**Cuándo se dispara SOLA** (estados que por sí mismos YA son el fallo, sin
-falsos positivos posibles):
+**Cuándo se dispara SOLA** (v3.03: con diagnóstico y **dos avisos**, ya no a la
+primera — ver §17.1):
 
-- `sin redraw > 3 s` → el metro del grid dejó de disparar.
-- `g.device = nil` → los `g:led`/`g:refresh` son no-ops silenciosos.
+- `sin redraw > 3 s` **dos ciclos seguidos con el latido puntual** → el metro dejó
+  de disparar de verdad.
+- `g.device = nil` **dos ciclos seguidos** → los `g:led`/`g:refresh` son no-ops
+  silenciosos.
 
 **Cuándo a MANO.** Para el congelado que **no se ve desde Lua** (por debajo,
 capa serial/USB), no hay señal que disparar, así que se expone a maiden:
@@ -809,6 +813,81 @@ cortaría el audio en directo. Ese caso se **registra**, no se "arregla" a ciega
 
 **Lección:** la función de un diagnóstico no es adivinar la causa, es hacer que
 el fallo sea observable — y, cuando el coste de equivocarse es nulo, **actuar**.
+### 17.1 La falsa alarma que destapó el problema (v3.03)
+
+**Síntoma, en maiden, con el instrumento funcionando:**
+
+```lua
+GRID HEARTBEAT: sin redraw desde hace 4.7 seconds -> recuperando
+GRID RECOVERY (sin redraw)
+   ...unos segundos después...
+GRID HEARTBEAT: sin redraw desde hace 3.2 seconds -> recuperando
+GRID RECOVERY (sin redraw)
+```
+
+La rejilla **parpadeó** (un frame en negro) pero siguió respondiendo: no estaba
+congelada. El watchdog que en v3.01 se describía como «sin falsos positivos
+posibles» era justo el que mentía.
+
+**Causa — VERIFICADA, no supuesta.** En `matron/src/events.cc`:
+
+- hay **un solo `event_loop()`**, que drena **una sola cola FIFO**;
+- `w_handle_metro()` (los ticks de `metro`) y `w_handle_clock_resume()` (los
+  despertares de `clock`) llaman **al mismo estado Lua** (`lvm`).
+
+O sea: **`metro` y `clock` están serializados.** Si cualquier manejador de Lua se
+bloquea N segundos, **se paran los dos a la vez**. Al reanudarse, el latido mide
+con `util.time()` (reloj de pared) frente a un `last_redraw` de **antes** del
+bloqueo → ve N segundos y concluye «congelado», cuando en realidad lo que se
+detuvo fue el bucle entero, y la rejilla se iba a recuperar sola en el siguiente
+tick de metro.
+
+`[NO DEMOSTRADO]` **Qué manejador bloqueó esos 4.7 s no se ha identificado.** Se
+sabe que no fue la rejilla; el culpable está en la cola de eventos. No se especula.
+
+**El parpadeo era nuestro, no del hardware.** `recover_grid()` empezaba con
+`g:all(0); g:refresh()`: mandaba los 128 LEDs a 0 y el siguiente tick de metro
+(67 ms) los repintaba. Ese frame en negro **es** el destello. Y `all(0)` era
+redundante: `dev_monome_grid_set_led()` marca dirty **sin comparar el valor**, así
+que `reset_cache()` ya fuerza el reenvío completo de los 4 quads (punto 3 de §17).
+Prueba empírica: `reset_cache()` **solo** ya se dispara cada 75 frames (5 s) desde
+v2.04 y nunca ha parpadeado.
+
+**Qué hace v3.03:**
+
+1. El latido mide **su propio atraso** (`late = (now - t0) - 2.0`). El latido vive
+   en `clock` y **no depende del metro**, así que si llega tarde es **prueba**,
+   no conjetura, de que se bloqueó el bucle entero. Con `late >= 1 s`: informa y
+   **no toca la rejilla**.
+2. Con el latido puntual, la decisión exige **dos avisos separados por un ciclo
+   entero**. Una parada transitoria nunca apaga nada; una congelación real se
+   recupera 2 s después — y `>> recover_grid()` sigue ahí para hacerlo al momento.
+3. El mensaje lleva **la prueba, no la sospecha**: `metro +0 ticks` = el metro no
+   disparó; `metro +31 ticks` = el metro corría pero el `redraw` no llegaba a
+   terminar.
+
+**Cómo leer un aviso de maiden a partir de ahora:**
+
+| Mensaje | Qué pasó | ¿Se toca la rejilla? |
+|---|---|---|
+| `...PERO el latido llegó Ns tarde => el bucle de Lua se bloqueó` | se paró el bucle entero | **No** — se cura solo |
+| `...latido puntual, metro +0 ticks -> aviso 1/2` | el metro se murió | Todavía no |
+| `...tras 2 avisos con el latido puntual -> recuperando` | congelación real | Sí |
+| `g.device = nil -> aviso 1/2` | los LEDs no llegan | Todavía no |
+| `g.device = nil tras 2 avisos -> recuperando` | persiste | Sí |
+
+**Lección (ampliada):** la v3.01 decía «cuando el coste de equivocarse es nulo,
+actuar». Eso era **falso**: apagar la rejilla que funcionaba es un coste real (un
+flash en pleno concierto) y se estaba pagando. La regla correcta es: **antes de
+actuar, comprobar que el coste de equivocarse es de verdad nulo**. Y cuando hay
+ambigüedad entre «el otro falló» y «los dos nos quedamos sin CPU», la prueba es
+medir **el atraso del propio watchdog** — es el único dato que separa los dos
+casos. La lógica quedó aislada en `GridNav.heartbeat_step()` (función pura) y
+cubierta por `tools/verify_p28_heartbeat.lua`, con control negativo que
+reproduce la regla de v3.02 y confirma que **sí** disparaba la recuperación
+equivocada.
+
+
 
 ### Ojo: esto no arregla el fallo del secuenciador
 

@@ -1,4 +1,4 @@
--- lib/ui.lua v3.02
+-- lib/ui.lua v3.03
 -- CHANGELOG v3.01:
 -- 1. FIX: draw_main leia G.sources_val[7] y [8] SIN el `or 0` que usa el resto
 --    del archivo. Un nil tumbaba el redraw de pantalla entero.
