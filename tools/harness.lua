@@ -31,13 +31,16 @@ end
 
 for _, name in ipairs{
   'save','restore','translate','rotate','level','fill','stroke',
-  'move','rect','pixel','circle','arc','line','update','clear',
-  'text','text_center','text_right',
+  'move','move_rel','line','line_rel','rect','pixel','circle','arc',
+  'close','curve','curve_rel','update','clear',
+  'text','text_center','text_right','text_trim','text_rotate','text_center_rotate',
+  'line_width','line_cap','line_join','miter_limit','font_face','font_size',
+  'color','blend_mode','invert','aa','peek','poke',
 } do
   screen[name] = function(...) rec(name, ...) end
 end
-screen.color = function() end
-screen.pixel = function(...) rec('pixel', ...) end
+-- color/blend_mode pueden recibir tablas o cadenas
+screen.color = function(...) rec('color', ...) end
 
 --------------------------------------------------------------------
 -- params: tabla simple con valores por defecto
@@ -85,6 +88,13 @@ function util.file_exists() return false end
 function util.make_dir() end
 function util.string_ext(s) return s:match('%.([^.]+)$') end
 function util.trim_string_to_width(s) return s end
+
+--------------------------------------------------------------------
+-- norns usa Lua 5.3, donde math.pow todavia existe (deprecado).
+-- Este banco corre con Lua 5.5, que ya lo elimino, asi que se reimplementa
+-- para poder ejecutar el codigo real. No afecta a la maquina.
+--------------------------------------------------------------------
+if not math.pow then math.pow = function(a, b) return a ^ b end end
 
 --------------------------------------------------------------------
 -- otros modulos que ncoco puede necesitar
@@ -164,14 +174,24 @@ _G.metro = metro
 _G.grid = grid
 _G.midi = midi
 _G.include = function(path)
-  local f = io.open(path, 'r')
-  if not f then
-    -- los modulos se cargan con dofile desde el test, no via include
-    return nil
-  end
+  -- ncoco usa include('ncoco/lib/quantussy'); aqui el prefijo es 'lib/'.
+  -- dofile NO anade la extension .lua, hay que ponerla.
+  local real = path:gsub('^ncoco/', '')
+  if not real:match('%.lua$') then real = real .. '.lua' end
+  local f = io.open(real, 'r')
+  if not f then return nil end
   f:close()
-  return dofile(path)
+  local ok, mod = pcall(dofile, real)
+  if not ok then return nil end
+  return mod
 end
 _G.print = print
+
+-- El dibujo de los hexagonos usa math.random(). Para que dos ejecuciones
+-- produzcan exactamente la misma pantalla hay que fijar la semilla antes de
+-- cada dibujo; si no, la comparacion seria siempre distinta.
+function H.semilla(n)
+  math.randomseed(n)
+end
 
 return H

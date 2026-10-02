@@ -124,29 +124,39 @@ end
 --------------------------------------------------------------------
 -- Comprobacion sobre el DIBUJO real de la pantalla
 --
--- Para el destino 5 se dibujan 108 pixeles de scope + 28 de la linea de
--- umbral (tx = 10,14,...,118) = 136 en total. El destino 6 NO dibuja la
--- linea de umbral, asi que debe dar 108 exactos.
+-- Desde el punto #12 de la Fase 3 el scope se dibuja como LINEA continua
+-- (1 pixel inicial + 107 segmentos + 1 stroke), igual que los inspectores de
+-- fuentes. Antes eran 108 pixeles sueltos, cada uno con su propio relleno.
+--
+-- Por eso aqui ya no se cuentan pixeles del scope, sino segmentos:
+--   - destinos 5, 6, 7, 12, 13, 14: 28 pixeles de umbral + 107 segmentos
+--   - el resto: 1 pixel inicial + 107 segmentos
 --------------------------------------------------------------------
 section('dibujo real en pantalla (lib/ui.lua tal cual esta)')
 
+local function medir(id)
+  H.reset()
+  UI.draw_dest_inspector(build_G('sparse'), id)
+  return H.count('pixel'), H.count('line'), H.count('fill'), H.count('stroke')
+end
+
 -- El codigo dibuja la linea de umbral para los destinos
--- 5, 6, 7, 12, 13 y 14 (ui.lua:149). El resto dibujan solo los 108 del scope.
-H.reset()
-UI.draw_dest_inspector(build_G('sparse'), 5)
-eq('destino 5: pixeles totales (108 scope + 28 umbral)', H.count('pixel'), 136)
+-- 5, 6, 7, 12, 13 y 14. El resto no.
+local p5, l5 = medir(5)
+eq('destino 5: 28 pixeles de umbral + 1 inicial de la onda', p5, 29)
+eq('destino 5: 107 segmentos de onda', l5, 107)
 
-H.reset()
-UI.draw_dest_inspector(build_G('sparse'), 6)
-eq('destino 6: tambien lleva umbral', H.count('pixel'), 136)
+local p6 = medir(6)
+eq('destino 6: tambien lleva umbral', p6, 29)
 
-H.reset()
-UI.draw_dest_inspector(build_G('sparse'), 9)
-eq('destino 9: sin umbral, 108 exactos', H.count('pixel'), 108)
+local p9, l9, f9, s9 = medir(9)
+eq('destino 9: sin umbral, 1 pixel inicial', p9, 1)
+eq('destino 9: 107 segmentos de onda', l9, 107)
+eq('destino 9: un solo relleno (el fondo)', f9, 1)
+eq('destino 9: 2 trazos (caja y onda)', s9, 2)
 
-H.reset()
-UI.draw_dest_inspector(build_G('sparse'), 24)
-eq('destino 24: sin umbral, 108 exactos', H.count('pixel'), 108)
+local p24 = medir(24)
+eq('destino 24: sin umbral, 1 pixel inicial', p24, 1)
 
 -- determinismo: dos dibujos seguidos deben ser identicos
 local function draw_twice(id)

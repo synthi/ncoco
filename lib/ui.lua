@@ -165,7 +165,18 @@ function UI.draw_dest_inspector(G, id)
     if G.patch[src][id] ~= 0 then activos[#activos+1] = src end
   end
 
+  -- v3.00 Fase 3 (#12): dibujar una linea continua en vez de 108 puntos
+  -- sueltos. Los inspectores de fuentes (UI.draw_scope) ya lo hacian asi;
+  -- aqui se dibujaba cada punto suelto con su propio screen.fill(), lo que
+  -- dejaba huecos visibles cuando el valor saltaba (parecia "saltarse
+  -- lineas") y costaba 108 rellenos por fotograma.
+  -- Ahora: una sola llamada a screen.stroke() para toda la onda.
+  -- NO se cambia el calculo: mismo py, mismo rango bipolar -1..+1 con el
+  -- cero en el centro, mismo recorte 30..54.
+  -- VERIFICADO con tools/verify_p12_scope.lua: los 108 valores son
+  -- identicos al calculo de referencia en los 4 escenarios probados.
   screen.level(15)
+  local last_px, last_py = nil, nil
   for x=0, w-1 do
     local sum = 0
     local hist_idx = (head - 1 - x - 1) % len + 1
@@ -174,9 +185,16 @@ function UI.draw_dest_inspector(G, id)
     end
     sum = sum * G.dest_gains[id]
     local py = center_y - (util.clamp(sum, -1, 1) * (h/2))
-    py = util.clamp(py, 30, 54) 
-    screen.pixel(10 + w - x, py); screen.fill()
+    py = util.clamp(py, 30, 54)
+    local px = 10 + w - x
+    if last_px then
+      screen.move(last_px, last_py); screen.line(px, py)
+    else
+      screen.pixel(px, py)
+    end
+    last_px = px; last_py = py
   end
+  screen.stroke()
   
   if id == 6 or id == 13 then
      local side = (id==6) and "L" or "R"
