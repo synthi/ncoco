@@ -350,16 +350,21 @@ Si cambias el `maxval` de un control, **cambia el `quantum`** proporcionalmente:
 
 ### 5.2 `add_group` — el conteo debe ser EXACTO
 
+`n` es el número de **huecos que se reservan** para los parámetros que van
+detrás. El nombre del grupo **NO cuenta**: es una etiqueta, no un hueco.
+
 ```lua
-params:add_group("COCO 1", 18)   -- declara 18
--- ...y luego se agregan 17 params
+params:add_group("COCO 1", 17)   -- reserva 17 huecos
+-- ...y se agregan exactamente 17 params
 ```
 
-Ese param #17 (el último) **cae fuera del grupo**. Aparece descolocado en el menú
-PARAMETERS, o se cuela en el grupo siguiente.
+Si sobran huecos, se llenan con lo que venga después (en ncoco, `Volume 2` se
+colaba dentro de COCO 1). Si faltan, los últimos params caen fuera del grupo.
+Cualquiera de los dos errores **desplaza** el resto del menú.
 
 **Cómo no equivocarse:** cuenta los `params:add_*` entre el `add_group` y el
-siguiente `add_group`. Automatízalo con un test.
+siguiente `add_group`. Ignora las líneas comentadas. Automatízalo con un test:
+`tools/verify_p22_grupo_coco.lua` lo hace y falla si no cuadra.
 
 ### 5.3 `default()` no es cargar el PSET
 
@@ -571,35 +576,36 @@ m.event = function(data)       -- SIEMPRE recibe el array crudo
 end
 ```
 
-### 7.1 SysEx: reensamblar en orden, y con `ipairs`
+### 7.1 SysEx: reensamblar en orden — pero `pairs`, NO `ipairs`
+
+⚠️ **Esta sección cambió el 2026-10. La versión anterior decía `ipairs` y era
+FALSA. No repitas el consejo viejo.**
 
 ```lua
--- MAL: pairs() sobre un array, el ORDEN NO ESTÁ GARANTIZADO
-for _, b in pairs(data) do tabla.insert(buf, b) end
+-- MAL: midi.devices puede tener HUECOS. ipairs() se detiene en el primer
+-- hueco y nunca ve el dispositivo que está conectado.
+for _, dev in ipairs(midi.devices) do ... end
 
--- BIEN: ipairs() respeta el orden 1..n de un array contiguo
-for _, b in ipairs(data) do tabla.insert(buf, b) end
+-- BIEN: pairs() recorre TODAS las claves, tenga huecos o no.
+for _, dev in pairs(midi.devices) do ... end
 ```
 
-En la práctica `pairs` sobre un array *suele* recorrer en orden porque la parte
-hash está vacía. **Pero no está garantizado**, y es un bug que aparece al cambiar
-de versión de Lua, no antes. Usa `ipairs` siempre.
+**Lo que pasó de verdad:** `midi.devices` no es un array contiguo. Si el
+dispositivo aparece en la posición 2 y no en la 1, `ipairs` se detiene en el
+primer hueco y **nunca lo encuentra**. El 16n se connectaba y el script no lo
+veía: sin faders, sin MIDI. Esto costó una regresión real (`b914b75` la revirtió).
+
+**Para arrays 1..n contiguos, `ipairs` sí es lo correcto.** La regla es: si
+puede haber huecos, `pairs`. No hay una regla única.
 
 ### 7.2 El handshake de config de un 16n
 
-El 16n (Faderfox) expone un dump de configuración por SysEx no estándar. El
-trampa habitual: **el byte que pides no es el byte que compruebas.**
+El 16n (Faderfox) expone un dump de configuración por SysEx no estándar.
 
-```lua
--- pides 0x1f...
-midi.send(dev, {0xf0, 0x7d, 0x00, 0x00, 0x1f, 0xf7})
--- ...pero compruebas 0x0f
-local function es_dump(p) return p[2]==0x7d and p[3]==0x00 and p[4]==0x00 and p[5]==0x0f end
-```
-
-Consecuencia: el dump **nunca** se reconoce, y el código cae silenciosamente al
-fallback. El instrumento funciona, pero estás usando el mapeo por defecto y no tu
-configuración. Es el tipo de bug que nadie reporta porque "funciona".
+**En ncoco el byte `0x0f` es el CORRECTO.** Se pide y se comprueba el mismo.
+Antes esta guía afirmaba que había una discrepancia (`0x1f` pedido, `0x0f`
+comprobado) y que por eso la config nunca se leía. **Era un análisis
+equivocado**: se下定a como bug algo que funciona. No lo "arregles" sin hardware.
 
 ### 7.3 Puertos virtuales
 

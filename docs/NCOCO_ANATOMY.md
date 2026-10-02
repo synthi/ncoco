@@ -657,20 +657,30 @@ WAV + los secuenciadores.
 
 ## 16. Deuda técnica conocida
 
+*(Actualizado 2026-10-02. Los puntos marcados RESUELTOS ya no aplican: no los
+"arregles" de nuevo — fueron análisis equivocados o bugs ya corregidos.)*
 
-*(Extraído del análisis de código, 2026-10-02. Pendiente de decisión.)*
+| Severidad | Asunto | Estado |
+|---|---|---|
+| **Alta** | Índice del `Select` en los modos de bits — el u-law probablemente no se activa (§6.4) | Pendiente |
+| ~~Alta~~ | ~~`add_group("COCO "..num, 18)` declaraba 18 con 17 params~~ | **RESUELTO** `1cb521e` → 17. El nombre de grupo NO cuenta. |
+| ~~Media~~ | ~~`storage.lua`: `for src=1, 10` con 12 fuentes~~ | **RESUELTO** `1cb521e` → 12. COCO 11/12 ya se restauran. |
+| ~~Media~~ | ~~`16n.lua`: byte `0x1f` pedido, `0x0f` comprobado~~ | **FALSO POSITIVO.** `0x0f` es correcto. Ver §7.2 de la guía. |
+| **Baja** | `normalize(msg.val, is_bipolar_param(p_name))` — el 2º argumento no se usa dentro de `normalize` | Pendiente |
+| **Baja** | `math.randomseed()` y el bucle de semillas de pétalos se anulan con `params:default()` justo después | Pendiente |
+| ~~Baja~~ | ~~`GridNav.is_dirty` se escribe en 5 sitios pero nunca se lee~~ | **RESUELTO** `ea40a9a` (eliminado a propósito) |
+| **Baja** | `MAX_BRIGHT` / `FADER_BG` y otras constantes sin uso en `globals.lua` | Pendiente |
+| ~~Info~~ | ~~`Storage.save` serializa `double_click_timer` (una corrutina)~~ | **FALSO POSITIVO.** `tab.save` la salta sin fallar. Nada roto. |
+| **Info** | Secuenciador: grabación seguida de reproducción vacía, esporádica | **SIN CAUSA.** No se reproduce en local. |
 
-| Severidad | Asunto |
-|---|---|
-| **Alta** | Índice del `Select` en los 3 modos de bits — el μ-law probablemente no se activa (§6.4) |
-| **Alta** | `params:add_group("COCO "..num, 18)` declara 18 pero hay 17 params — el último cae fuera |
-| **Media** | `storage.lua` línea 74: `for src=1, 10` pero hay 12 fuentes — las fuentes 11–12 no se restauran |
-| **Media** | `16n.lua`: se pide el byte `0x1f` del dump SysEx pero se comprueba `0x0f` — la config nunca se lee |
-| **Baja** | `normalize(msg.val, is_bipolar_param(p_name))` — el 2º argumento no se usa dentro de `normalize` |
-| **Baja** | `math.randomseed()` y el bucle de semillas de pétalos se anulan con `params:default()` justo después |
-| **Baja** | `GridNav.is_dirty` se escribe en 5 sitios pero nunca se lee |
-| **Baja** | `MAX_BRIGHT` / `FADER_BG` y otras constantes sin uso en `globals.lua` |
-| **Info** | `Storage.save` serializa `double_click_timer` (una corrutina) con `tab.save` |
+---
+
+### Nota sobre #14 (inspector)
+
+`tools/verify_p14_inspector.lua` da 12 correctos / 4 fallidos. Los 4 fallos son
+**solo de dibujo de la forma de onda** (destinos 5, 6 y 9): 1 píxel de más en el
+umbral y 4 segmentos de más en el trazo. **No afecta al sonido ni a los datos** —
+es geometría del dibujo. Preexistente, no introducido en v3.00.
 
 ---
 
