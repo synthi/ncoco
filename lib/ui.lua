@@ -153,13 +153,24 @@ function UI.draw_dest_inspector(G, id)
   end
 
   local head = G.scope_head; local len = G.SCOPE_LEN; local w, h = 108, 25; local center_y = 30 + h/2
+
+  -- v3.00 Fase 3 (#14): precalcular que fuentes tienen cableado a este destino.
+  -- Antes se recorrian las 12 fuentes para cada uno de los 108 pixeles
+  -- (~1300 busquedas por cuadro). Con la lista precalculada solo se suman las
+  -- que NO son cero, que normalmente son 3 o 4.
+  -- VERIFICADO con tools/verify_p14_inspector.lua: el scope resultante es
+  -- identico en los 108 pixeles con matriz vacia, dispersa y completa.
+  local activos = {}
+  for src=1, 12 do
+    if G.patch[src][id] ~= 0 then activos[#activos+1] = src end
+  end
+
   screen.level(15)
   for x=0, w-1 do
     local sum = 0
     local hist_idx = (head - 1 - x - 1) % len + 1
-    for src=1, 12 do
-      local amt = G.patch[src][id]
-      if amt ~= 0 then sum = sum + (G.scope_history[src][hist_idx] * amt) end
+    for _, src in ipairs(activos) do
+      sum = sum + (G.scope_history[src][hist_idx] * G.patch[src][id])
     end
     sum = sum * G.dest_gains[id]
     local py = center_y - (util.clamp(sum, -1, 1) * (h/2))

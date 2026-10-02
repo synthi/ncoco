@@ -108,11 +108,19 @@ end
 function G.snap_apply(data)
   if not data then return end
   if data.patch then
+     -- v3.00 Fase 3: rellenar la matriz ENTERA y despues enviar una sola vez
+     -- por destino. Antes se llamaba a update_matrix dentro del bucle de
+     -- fuentes: 12x24 = 288 llamadas OSC, de las que 264 eran redundantes
+     -- (el motor solo conserva la ultima de cada destino).
+     -- VERIFICADO con tools/verify_p8_matrix.lua: el estado final en las 288
+     -- celdas es identico. Ver ncoco.lua historial para el detalle.
      for s=1, 12 do
         for d=1, 24 do
            G.patch[s][d] = data.patch[s][d] or 0
-           SC.update_matrix(d, G)
         end
+     end
+     for d=1, 24 do
+        SC.update_matrix(d, G)
      end
   end
   if data.petals then
