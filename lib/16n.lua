@@ -1,9 +1,18 @@
 -- lib/16n.lua v2.03
+-- CLEANUP v3.00 FASE 1:
+-- 1. FIX (B5): is_sysex_config_dump compared 0x0f while the request sends 0x1f —
+--    the 16n config dump was NEVER parsed and it silently fell back to CC 32-47.
+-- 2. FIX (B6): pairs() -> ipairs() when accumulating SysEx bytes (order not
+--    guaranteed with pairs) and for midi.devices.
+-- 3. REMOVED the unused `bipolar` argument from normalize() (see note below).
 -- CHANGELOG v2.03:
 -- 1. FIX: Removed midi inversion from normalize() — hardware already provides inverted signal.
 -- 2. FIX: Changed taper logic — pivot changes based on orientation:
 --    Inverted: pivot at MIDI 80 (physical center), Normal: pivot at MIDI 47 (mirror of 80).
 -- 3. FIX: Bipolar params use same linear 2-segment taper (power curve removed).
+--    The `bipolar` argument was removed in v3.00: the branch that used it was
+--    deliberately dropped, and bipolar mapping now happens downstream in
+--    apply_curve() (linlin 0..1 -> -1..1). Passing it was dead weight.
 -- CHANGELOG v2.02:
 -- 1. NEW: _16n.inverted flag + _16n.set_inverted() for Normal/Inverted fader orientation.
 -- 2. NEW: _16n.normalize(midi_val, bipolar) with log-taper linearization for bipolar params.
@@ -23,7 +32,7 @@ _16n.set_inverted = function(state)
    _16n.last_values = {}
 end
 
-_16n.normalize = function(midi_val, bipolar)
+_16n.normalize = function(midi_val)
    if midi_val < 1 then return 0.0 end
    if midi_val > 126 then return 1.0 end
    local pivot = _16n.inverted and 80 or 47
@@ -41,7 +50,7 @@ _16n.request_sysex_config_dump = function(midi_dev)
   end
 end
 
-_16n.is_sysex_config_dump = function(sysex_payload) return (sysex_payload[2] == 0x7d and sysex_payload[3] == 0x00 and sysex_payload[4] == 0x00 and sysex_payload[5] == 0x0f) end
+_16n.is_sysex_config_dump = function(sysex_payload) return (sysex_payload[2] == 0x7d and sysex_payload[3] == 0x00 and sysex_payload[4] == 0x00 and sysex_payload[5] == 0x1f) end
 
 _16n.parse_sysex_config_dump = function(sysex_payload)
   local i = 6 + 4; local usb_cc_list = {}
@@ -52,7 +61,7 @@ end
 local dev_16n, midi_16n, conf_16n = nil, nil, nil
 
 _16n.init = function(cc_cb_fn)
-  for _,dev in pairs(midi.devices) do
+  for _,dev in ipairs(midi.devices) do
     if dev.name~=nil and (string.find(string.lower(dev.name), "16n") or string.find(string.lower(dev.name), "fade")) then
       print("16n: Found device: " .. dev.name)
       dev_16n = dev; midi_16n = midi.connect(dev.port)
@@ -62,7 +71,7 @@ _16n.init = function(cc_cb_fn)
       midi_16n.event=function(data)
         local d=midi.to_msg(data)
         if is_sysex_dump_on then
-          for _, b in pairs(data) do table.insert(sysex_payload, b)
+          for _, b in ipairs(data) do table.insert(sysex_payload, b)
             if b == 0xf7 then 
                 is_sysex_dump_on = false
                 if _16n.is_sysex_config_dump(sysex_payload) then 
@@ -74,7 +83,7 @@ _16n.init = function(cc_cb_fn)
         elseif d.type == 'sysex' then 
             is_sysex_dump_on = true
             sysex_payload = {}
-            for _, b in pairs(d.raw) do table.insert(sysex_payload, b) end
+            for _, b in ipairs(d.raw) do table.insert(sysex_payload, b) end
         elseif d.type == 'cc' and cc_cb_fn ~= nil then 
            local last = _16n.last_values[d.cc] or -1
            

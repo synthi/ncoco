@@ -1,4 +1,8 @@
 -- lib/param_set.lua v2.14
+-- CLEANUP v3.00 FASE 1:
+-- 1. RENAME "μ-law" -> "12bit" in the Bits menu: index 2 sends bitDepth 12,
+--    which the engine quantized as plain 12-bit linear, not μ-law. No index
+--    moved, so existing presets keep their meaning. μ-law returns in Fase 2.
 -- CHANGELOG v2.20:
 -- 1. REPLACE: "NICAM" -> "SBC" (Sub-Band Coding). Eliminado param nicam_bits (SBC es hardcoded 10+5).
 -- CHANGELOG v2.14:
@@ -120,7 +124,7 @@ function Params.init(SC, G, _16n)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-     params:add_option("bits"..s, "Bits "..num, {"8bit", "μ-law", "SBC"}, 1)
+     params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "SBC"}, 1)
     params:set_action("bits"..s, function(x) 
        local b = (x==1) and 8 or ((x==2) and 12 or 14)
        SC.set_bitdepth(i,b) 

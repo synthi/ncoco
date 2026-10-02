@@ -1,4 +1,11 @@
 -- lib/quantussy.lua v2.01
+-- CLEANUP v3.00 FASE 1:
+-- 1. FIX (B8): a missing petal coordinate used to `return` out of the whole
+--    draw loop, killing the other 5 petals. It now skips only that petal.
+-- NOTE: Q.history table.remove/insert is INTENTIONALLY kept. The dim-to-bright
+--    trail is the intended "frame buffer" look; a ring buffer would render the
+--    same but the gain is negligible (6-element array). Do not "optimize" it
+--    without a visual A/B check.
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v3002:
@@ -36,93 +43,94 @@ end
 function Q.draw(G) 
   for i=1, 6 do
     local p = Q.coords[i]
-    if not p then return end -- Safety check
+    if p then -- Safety: a broken petal must not abort the other 5
     
-    local val = G.sources_val[i] or 0
-    local chaos = params:get("p"..i.."chaos") or 0
-    local shape_idx = params:get("p"..i.."shape") or 1
-    local range_idx = params:get("p"..i.."range") or 1
+      local val = G.sources_val[i] or 0
+      local chaos = params:get("p"..i.."chaos") or 0
+      local shape_idx = params:get("p"..i.."shape") or 1
+      local range_idx = params:get("p"..i.."range") or 1
     
-    -- Frequency for spin calculation
-    local freq_param = (range_idx==1) and "p"..i.."f_lfo" or "p"..i.."f_aud"
-    local freq = params:get(freq_param) or 100
+      -- Frequency for spin calculation
+      local freq_param = (range_idx==1) and "p"..i.."f_lfo" or "p"..i.."f_aud"
+      local freq = params:get(freq_param) or 100
     
-    local is_audio = (range_idx == 2)
-    local shape = shape_idx -- 1=Tri, 2=Castle
+      local is_audio = (range_idx == 2)
+      local shape = shape_idx -- 1=Tri, 2=Castle
     
-    -- Update history
-    table.remove(Q.history[i], 1)
-    table.insert(Q.history[i], val)
+      -- Update history
+      table.remove(Q.history[i], 1)
+      table.insert(Q.history[i], val)
     
-    -- Base rotation and vibration
-    local base_theta = (util.time() * chaos * 8)
-    local vib_x = (math.random() - 0.5) * chaos * 3
-    local vib_y = (math.random() - 0.5) * chaos * 3
+      -- Base rotation and vibration
+      local base_theta = (util.time() * chaos * 8)
+      local vib_x = (math.random() - 0.5) * chaos * 3
+      local vib_y = (math.random() - 0.5) * chaos * 3
     
-    -- Audio Mode Spin
-    local freq_spin = 0
-    if is_audio then 
-      -- Map 20Hz-2000Hz to rotation speed
-      freq_spin = util.time() * util.linlin(20, 2000, 1, 20, freq) 
-    end
-    local total_theta = base_theta + freq_spin
-    
-    local size = util.linlin(0, 1, 1, 9, val)
-    local bright = math.floor(util.linlin(0, 1, 4, 15, val))
-
-    -- DRAWING FUNCTION (Switches logic based on mode)
-    local function draw_shape(x, y, sz, angle, level, audio_mode)
-      screen.level(level)
-      screen.save() 
-      screen.translate(x, y) 
-      screen.rotate(angle)   
-      
-      local w_ratio = 1
-      if shape == 2 then -- S&H shape modifier (Castle)
-         w_ratio = 1 + (math.sin(util.time()*10) * chaos * 0.5)
+      -- Audio Mode Spin
+      local freq_spin = 0
+      if is_audio then 
+        -- Map 20Hz-2000Hz to rotation speed
+        freq_spin = util.time() * util.linlin(20, 2000, 1, 20, freq) 
       end
+      local total_theta = base_theta + freq_spin
+    
+      local size = util.linlin(0, 1, 1, 9, val)
+      local bright = math.floor(util.linlin(0, 1, 4, 15, val))
+
+      -- DRAWING FUNCTION (Switches logic based on mode)
+      local function draw_shape(x, y, sz, angle, level, audio_mode)
+        screen.level(level)
+        screen.save() 
+        screen.translate(x, y) 
+        screen.rotate(angle)   
       
-      if audio_mode then
-        -- === NEBULA MODE (Points) ===
-        for j = 1, NEBULA_POINTS do
-           local off = NEBULA_OFFSETS[j]
-           -- Scale offset by current size/envelope
-           local px = off.x * (sz / r) * w_ratio
-           local py = off.y * (sz / r) / w_ratio
-           
-           -- Add jitter (Electron cloud effect)
-           px = px + (math.random()-0.5) * 2
-           py = py + (math.random()-0.5) * 2
-           
-           screen.pixel(px, py)
+        local w_ratio = 1
+        if shape == 2 then -- S&H shape modifier (Castle)
+           w_ratio = 1 + (math.sin(util.time()*10) * chaos * 0.5)
         end
-        screen.fill() -- Render points
-      else
-        -- === LFO MODE (Solid Rect) ===
-        local w = sz * w_ratio
-        local h = sz / w_ratio
-        screen.rect(-w/2, -h/2, w, h)
-        screen.fill() -- Render solid
+      
+        if audio_mode then
+          -- === NEBULA MODE (Points) ===
+          for j = 1, NEBULA_POINTS do
+             local off = NEBULA_OFFSETS[j]
+             -- Scale offset by current size/envelope
+             local px = off.x * (sz / r) * w_ratio
+             local py = off.y * (sz / r) / w_ratio
+           
+             -- Add jitter (Electron cloud effect)
+             px = px + (math.random()-0.5) * 2
+             py = py + (math.random()-0.5) * 2
+           
+             screen.pixel(px, py)
+          end
+          screen.fill() -- Render points
+        else
+          -- === LFO MODE (Solid Rect) ===
+          local w = sz * w_ratio
+          local h = sz / w_ratio
+          screen.rect(-w/2, -h/2, w, h)
+          screen.fill() -- Render solid
+        end
+      
+        screen.restore() 
       end
-      
-      screen.restore() 
-    end
 
-    -- Draw Trails
-    for j=1, 4 do
-      local h_val = Q.history[i][j]
-      local h_size = util.linlin(0, 1, 1, 9, h_val)
-      local h_bright = math.floor(10 / (5-j)) 
-      -- Trails spin slower in audio mode to create a "blur" effect
-      local trail_angle = is_audio and (total_theta - (j*0.2)) or (total_theta - (j*0.5))
+      -- Draw Trails
+      for j=1, 4 do
+        local h_val = Q.history[i][j]
+        local h_size = util.linlin(0, 1, 1, 9, h_val)
+        local h_bright = math.floor(10 / (5-j)) 
+        -- Trails spin slower in audio mode to create a "blur" effect
+        local trail_angle = is_audio and (total_theta - (j*0.2)) or (total_theta - (j*0.5))
       
-      draw_shape(p.x + vib_x + (math.random()-0.5)*chaos*5, 
-                 p.y + vib_y + (math.random()-0.5)*chaos*5, 
-                 h_size, trail_angle, h_bright, is_audio)
-    end
+        draw_shape(p.x + vib_x + (math.random()-0.5)*chaos*5, 
+                   p.y + vib_y + (math.random()-0.5)*chaos*5, 
+                   h_size, trail_angle, h_bright, is_audio)
+      end
 
     -- Draw Main Element
     draw_shape(p.x + vib_x, p.y + vib_y, size, total_theta, bright, is_audio)
+    end
   end
 end
 return Q

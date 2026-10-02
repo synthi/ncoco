@@ -98,10 +98,6 @@ function SC.set_env_slew(id, val)
   if engine[cmd] then engine[cmd](val) end
 end
 
-function SC.set_loop_len(val)
-  if engine.loopLen then engine.loopLen(val) end
-end
-
 function SC.set_monitor_level(val)
    if engine.monitorLevel then engine.monitorLevel(val) end
 end

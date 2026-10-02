@@ -1,4 +1,7 @@
 -- lib/grid_nav.lua v2.05
+-- CLEANUP v3.00 FASE 1 (no functional change):
+-- 1. REMOVED GridNav.is_dirty (written 5x, never read; see note at the field).
+-- 2. Grid debounce key is now numeric (x-1)*8+y instead of a "x,y" string.
 -- CHANGELOG v2.05:
 -- 1. OPT: g:refresh() only called when at least one LED changed (reduces serial traffic).
 -- 2. OPT: Cache reset every 75 frames (~5s at 15Hz) to prevent desync.
@@ -28,7 +31,11 @@ local GridNav = {}
 GridNav.cache = {}
 GridNav.debounce = {} 
 GridNav.snap_timers = {}
-GridNav.is_dirty = true
+-- NOTE (v3.00): `GridNav.is_dirty` was removed ON PURPOSE. It was written in 5
+-- places but never read: the flag was meant to gate the redraw, but that check
+-- was intentionally disabled (see CHANGELOG v10001) to allow fluid animation —
+-- the sequencer/REC blink uses math.sin(util.time()), which changes every frame
+-- with no user input. Re-adding the gate would freeze those LEDs.
 GridNav.refresh_counter = 0
 
 function GridNav.init_map(G)
@@ -81,10 +88,11 @@ function GridNav.key(G, g, x, y, z, simulated)
   local obj = G.grid_map[x] and G.grid_map[x][y]
   if not obj then return end
   
-  GridNav.is_dirty = true
-  
+    
   if z == 1 and not simulated then
-     local id_key = x..","..y
+     -- Numeric key (x-1)*8+y instead of a "x,y" string: avoids a string
+     -- allocation on every button press. 1..128 maps to a 1D array.
+     local id_key = (x-1)*8 + y
      local last_time = GridNav.debounce[id_key] or 0
      local now = util.time()
      if (now - last_time) < 0.05 then return end
@@ -141,8 +149,7 @@ function GridNav.key(G, g, x, y, z, simulated)
            if GridNav.snap_timers[obj.id] ~= 0 then
               G.snap_clear(obj.id)
               GridNav.snap_timers[obj.id] = -1 
-              GridNav.is_dirty = true
-           end
+                         end
         end)
      elseif z == 0 then
         if GridNav.snap_timers[obj.id] == -1 then
@@ -160,8 +167,7 @@ function GridNav.key(G, g, x, y, z, simulated)
               end
            end
         end
-        GridNav.is_dirty = true
-     end
+             end
      return
   end
 
@@ -185,8 +191,7 @@ function GridNav.key(G, g, x, y, z, simulated)
                      if s.state == 3 then return end
                      if s.state == 2 then s.state = 4 else s.state = 2 end
                      s.double_click_timer = nil
-                     GridNav.is_dirty = true
-                  end)
+                                       end)
                end
             elseif s.state == 3 then
                s.state = 2; s.start_time = util.time(); s.step = 1

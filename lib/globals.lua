@@ -2,6 +2,11 @@
 -- CHANGELOG v2.02:
 -- 1. CLEANUP: Removed M.fader_inverted (moved to 16n.lua as _16n.inverted).
 
+-- CLEANUP (v3.00 Fase 1): removed unused state (MAX/HIGH/MED/DIM/OFF_BRIGHT,
+--   state_file, tape_path_1/2, M.input) — zero references project-wide.
+--   M.input was shadowed by params: preamp/envSlew live in the PARAMETERS menu.
+--   M.FADER_BG is kept intentionally (possible legacy/preset meaning).
+--
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9000:
@@ -10,17 +15,7 @@
 
 local M = {}
 
-M.loaded = false 
-M.state_file = _path.data .. "ncoco/patch_state.data"
-
-M.tape_path_1 = ""
-M.tape_path_2 = ""
-
-M.MAX_BRIGHT = 15
-M.HIGH_BRIGHT = 10 
-M.MED_BRIGHT = 6
-M.DIM_BRIGHT = 4
-M.OFF_BRIGHT = 2
+M.loaded = false
 
 M.SPEED_TABLE = {0.002, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0}
 M.FADER_BG = {2, 2, 2, 4, 2, 2, 2}
@@ -29,8 +24,6 @@ M.coco = {
   { pos=0, gate_rec=0, gate_flip=1, gate_skip=0, real_speed=1.0, out_level=0, base_speed=1.0 },
   { pos=0, gate_rec=0, gate_flip=1, gate_skip=0, real_speed=1.0, out_level=0, base_speed=1.0 }
 }
-
-M.input = { { preamp=1.0, slew=0.05 }, { preamp=1.0, slew=0.05 } }
 
 M.sequencers = {}
 for i=1, 4 do

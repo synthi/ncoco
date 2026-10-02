@@ -1,4 +1,7 @@
 -- ncoco.lua v2.14
+-- CLEANUP v3.00 FASE 1 (no functional change):
+-- 1. REMOVED is_bipolar_param() and the 2nd arg of _16n.normalize() (unused).
+-- 2. /update: args[23]/[24] nil-guards use the same `or 0` style as the rest.
 -- CHANGELOG v2.14:
 -- 1. FIX: NICAM — 2× BLowPass4 anti-aliasing + 2× reconstrucción + TPDF dither.
 -- 2. FIX: E4 bits text only visible in NICAM mode.
@@ -176,11 +179,6 @@ function G.snap_clear(id)
 end
 
 -- --- HELPERS FOR 16n ---
-local function is_bipolar_param(p_name)
-   return p_name == "filtL" or p_name == "filtR" or
-          p_name == "speed_offsetL" or p_name == "speed_offsetR" or
-          p_name == "pan_l" or p_name == "pan_r"
-end
 local function apply_glue(val_norm, param_id)
    if param_id == "speed_offsetL" or param_id == "speed_offsetR" or 
       param_id == "filtL" or param_id == "filtR" or 
@@ -309,8 +307,8 @@ function init()
       G.coco[1].real_speed = (args[19] or 0); G.coco[2].real_speed = (args[20] or 0)
       G.coco[1].out_level = (args[21] or 0); G.coco[2].out_level = (args[22] or 0)
       
-      if args[23] then G.sources_val[11] = args[23] else G.sources_val[11] = 0 end
-      if args[24] then G.sources_val[12] = args[24] else G.sources_val[12] = 0 end
+      G.sources_val[11] = (args[23] or 0)
+      G.sources_val[12] = (args[24] or 0)
       
     elseif path == '/buffer_info' then
       local dur = args[2]
@@ -391,7 +389,7 @@ function init()
                 local p_obj = params:lookup_param(p_name)
                 if not p_obj then return end
 
-                local val_calibrated = _16n.normalize(msg.val, is_bipolar_param(p_name))
+                local val_calibrated = _16n.normalize(msg.val)
                 local val_glued = apply_glue(val_calibrated, p_name)
                 
                 local current_norm = params:get_raw(p_name)

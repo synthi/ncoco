@@ -1,4 +1,8 @@
 -- lib/ui.lua v2.14
+-- CLEANUP v3.00 FASE 1:
+-- 1. BIT_NAMES[2] "u-law" -> "12bit": the engine never reached the μ-law branch
+--    (index 1 was unreachable), so this slot has always been 12-bit linear.
+--    The honest name. See NCOCO_ANATOMY.md §6.4.
 -- CHANGELOG v2.14:
 -- 1. FIX: E4 bits text only visible in NICAM mode (bit_idx==3).
 -- CHANGELOG v2.12:
@@ -26,7 +30,9 @@ local DST_NAMES = {
   [21]="VOL 1", [22]="VOL 2",
   [23]="AUD IN 1", [24]="AUD IN 2"
 }
-local BIT_NAMES = {[1]="8bit", [2]="u-law", [3]="SBC"}
+-- v3.00 Fase 2: this table grows to 4 entries ("8bit","12bit","SBC","μ-law").
+-- The menu is reindexed so existing presets keep their meaning.
+local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="SBC"}
 
 function UI.update_histories(G)
   for i=1, 2 do

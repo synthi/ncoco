@@ -1,4 +1,9 @@
 // Engine_Ncoco.sc v2.20
+// CLEANUP v3.00 FASE 1 (no audio change):
+// 1. REMOVED dead SynthDef arg `interp=2` (never referenced; the interpolation
+//    value is computed inline from the mode flags).
+// 2. REMOVED dead arg `slew_speed` + its addCommand (never used in the DSP
+//    body; slew_amp and slew_misc ARE used and were kept).
 // CHANGELOG v2.20:
 // 1. REPLACE: NICAM → SBC (Sub-Band Coding) 2-bandas. Crossover LPF+HPF 6.8kHz (suma plana).
 //    Banda baja 10-bit + TPDF dither, banda alta 5-bit + TPDF dither. 48kHz nativo.
@@ -87,7 +92,7 @@ Engine_Ncoco : CroneEngine {
 			flipL=0, flipR=0, skipL=0, skipR=0,           
 			volInL=1.0, volInR=1.0,     
 			
-			bitDepthL=8, bitDepthR=8, interp=2,                   
+			bitDepthL=8, bitDepthR=8,                   
             loopLenL=8.0, loopLenR=8.0,
 			
 			skipModeL=0, skipModeR=0, 
@@ -106,7 +111,7 @@ Engine_Ncoco : CroneEngine {
             coco1OutMode=0, coco2OutMode=0, 
             cocoSlewL=0.1, cocoSlewR=0.1,
 
-			slew_speed=0.1, slew_amp=0.05, slew_misc=0;
+			slew_amp=0.05, slew_misc=0;
 
 			// --- VARS ---
 			var dest_gains = NamedControl.kr(\dest_gains, 1!24); 
@@ -548,7 +553,6 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 		this.addCommand("skipR", "i", { |msg| synth_core.set(\skipR, msg[1]) });
 		this.addCommand("bitDepthL", "f", { |msg| synth_core.set(\bitDepthL, msg[1]) });
 		this.addCommand("bitDepthR", "f", { |msg| synth_core.set(\bitDepthR, msg[1]) });
-		this.addCommand("slew_speed", "f", { |msg| synth_core.set(\slew_speed, msg[1]) });
 		this.addCommand("preampL", "f", { |msg| synth_core.set(\preampL, msg[1]) });
 		this.addCommand("preampR", "f", { |msg| synth_core.set(\preampR, msg[1]) });
 		this.addCommand("envSlewL", "f", { |msg| synth_core.set(\envSlewL, msg[1]) });
