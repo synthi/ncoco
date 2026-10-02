@@ -105,7 +105,10 @@ function Params.init(SC, G, _16n)
     local s = (i==1) and "L" or "R"
     local num = (i==1) and "1" or "2"
     
-    params:add_group("COCO "..num, 18) 
+    -- 17 = numero REAL de params de abajo (ver tools/verify_p22_grupo_coco.lua).
+    -- Con 18 sobraba un hueco: "Volume 2" caia dentro de COCO 1 y los params de
+    -- COCO 2 se quedaban sueltos, sin carpeta.
+    params:add_group("COCO "..num, 17) 
     
     params:add_control("vol_"..string.lower(s), "Volume "..num, controlspec.new(0, 2.0, "lin", 0, 1.0))
     params:set_action("vol_"..string.lower(s), function(x) SC.set_amp(i, x) end)

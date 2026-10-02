@@ -70,8 +70,12 @@ function Storage.load(G, SC, pset_number)
     local data = tab.load(file)
     if data then
       -- 1. Restore Static Data (Instant)
+      -- 12 = numero real de fuentes (globals.lua crea 12). Con 10 las salidas
+      -- COCO (11, 12) se perdian al cargar: quedaban desconectadas.
+      -- Un PSET antiguo guardado con 10 fuentes sigue siendo valido: las filas
+      -- que no existan se dejan como estaban.
       if data.patch then
-        for src=1, 10 do
+        for src=1, 12 do
           if data.patch[src] then 
              for dst=1, 24 do 
                 local val = data.patch[src][dst] or 0.0 
