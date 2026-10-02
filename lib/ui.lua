@@ -153,10 +153,18 @@ function UI.draw_dest_inspector(G, id)
   end
   
   -- cabecera en UNA sola fila: titulo izquierda, "E3 GAIN IN: valor" derecha
-  -- nivel 8: mas brillante que las etiquetas (4) pero sin llegar al 15 de los
-  -- valores, para que el gain se lea sin competir con el nombre del destino.
-  screen.level(8)
-  screen.move(126, 6); screen.text_right("E3 GAIN IN: "..string.format("%.2fx", G.dest_gains[id]))
+  -- etiqueta a nivel 6 (antes 3, se perdia contra el fondo) y valor a nivel 12
+  -- (antes 8, se leia apagado; 12 es brillante sin competir con el 15 de los
+  -- valores principales).
+  -- El titulo mas largo es el de SKIP ("SKIP 1: SINGLE"), y ahi no cabe la
+  -- etiqueta: en ese caso se muestra solo el valor.
+  local gain_txt = string.format("%.2fx", G.dest_gains[id])
+  if id ~= 6 and id ~= 13 then
+     screen.level(6); screen.move(90, 6); screen.text_right("E3 GAIN IN:")
+     screen.level(12); screen.move(126, 6); screen.text_right(gain_txt)
+  else
+     screen.level(12); screen.move(126, 6); screen.text_right(gain_txt)
+  end
   screen.level(15)
   screen.rect(BOX_X, BOX_Y, BOX_W, BOX_H); screen.stroke()
   
