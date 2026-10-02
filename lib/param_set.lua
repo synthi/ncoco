@@ -1,8 +1,14 @@
--- lib/param_set.lua v2.14
+-- lib/param_set.lua v2.15
+-- FIX v3.00:
+-- 1. B7: the 4th Bits option "μ-law" -> "u-law". The norns builtin 6x13 font has
+--    NO glyph for U+03BC (GREEK SMALL LETTER MU) — only ASCII 32..126. The
+--    UTF-8 bytes (0xCE 0xBC) render as nothing, so the menu showed "-law".
+--    The label is display-only: params store the option INDEX (1..4), never
+--    the string, so renaming cannot invalidate existing presets.
 -- CLEANUP v3.00 FASE 1:
--- 1. RENAME "μ-law" -> "12bit" in the Bits menu: index 2 sends bitDepth 12,
---    which the engine quantized as plain 12-bit linear, not μ-law. No index
---    moved, so existing presets keep their meaning. μ-law returns in Fase 2.
+-- 2. RENAME "u-law" -> "12bit" in the Bits menu: index 2 sent bitDepth 12,
+--    which the engine quantized as plain 12-bit linear, not mu-law. No index
+--    moved, so existing presets keep their meaning. mu-law returns in Fase 2.
 -- CHANGELOG v2.20:
 -- 1. REPLACE: "NICAM" -> "SBC" (Sub-Band Coding). Eliminado param nicam_bits (SBC es hardcoded 10+5).
 -- CHANGELOG v2.14:
@@ -124,7 +130,7 @@ function Params.init(SC, G, _16n)
     params:add_control("filt"..s, "Filter "..num, controlspec.new(-1, 1, "lin", 0, 0))
     params:set_action("filt"..s, function(x) SC.set_filter(i,x) end)
     
-     params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "SBC", "μ-law"}, 1)
+     params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "SBC", "u-law"}, 1)
     params:set_action("bits"..s, function(x) 
        SC.set_mode(i, x-1)  -- 1..4 -> mode 0..3 (0=8bit 1=12bit 2=SBC 3=mu-law)
     end)

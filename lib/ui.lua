@@ -1,14 +1,17 @@
--- lib/ui.lua v2.14
--- CLEANUP v3.00 FASE 1:
--- 1. BIT_NAMES[2] "u-law" -> "12bit": the engine never reached the μ-law branch
---    (index 1 was unreachable), so this slot has always been 12-bit linear.
---    The honest name. See NCOCO_ANATOMY.md §6.4.
+-- lib/ui.lua v2.15
+-- FIX v3.00:
+-- 1. B7: BIT_NAMES[4] "μ-law" -> "u-law". The norns builtin 6x13 font has NO glyph
+--    for U+03BC (GREEK SMALL LETTER MU) — only ASCII 32..126. The UTF-8 bytes
+--    (0xCE 0xBC) render as nothing, so the display showed "-law".
+--    Commit b7b7240 (v2.05, by the original author) had deliberately used
+--    "u-law" here for exactly this reason. Fase 2 reintroduced the mu and
+--    unknowingly reverted that fix. Restored.
 -- CHANGELOG v2.14:
 -- 1. FIX: E4 bits text only visible in NICAM mode (bit_idx==3).
 -- CHANGELOG v2.12:
--- 1. RENAME: BIT_NAMES[3] "ADPCM" → "1bit CVSD".
+-- 1. RENAME: BIT_NAMES[3] "ADPCM" -> "1bit CVSD".
 -- CHANGELOG v2.02:
--- 1. RENAME: BIT_NAMES[2] "12bit" → "μ-law".
+-- 1. RENAME: BIT_NAMES[2] "12bit" -> "u-law" (the display-safe spelling).
 
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
@@ -31,8 +34,10 @@ local DST_NAMES = {
   [23]="AUD IN 1", [24]="AUD IN 2"
 }
 -- v3.00 Fase 2: 4 modes. "8bit" is the ORIGINAL tuning restored (2f85646);
--- "μ-law" is the real companding branch, which was unreachable before.
-local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="SBC", [4]="μ-law"}
+-- "u-law" is the real companding branch, which was unreachable before.
+-- NOTE: spelled "u-law", not "μ-law": the norns builtin font has no glyph for
+-- U+03BC, so the Greek letter renders as nothing (shows "-law"). See B7.
+local BIT_NAMES = {[1]="8bit", [2]="12bit", [3]="SBC", [4]="u-law"}
 
 function UI.update_histories(G)
   for i=1, 2 do
