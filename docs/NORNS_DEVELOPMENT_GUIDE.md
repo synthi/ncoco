@@ -29,7 +29,10 @@
 
 
 Extraídas del `Dockerfile` y `wscript` del repo oficial `monome/norns` (no de
-memoria, no de blogs). **Verificadas el 2026-10-02.**
+memoria, no de blogs). **Verificadas el 2026-10-02** y **re-verificadas al corregir
+esta guía en v3.03** contra el mismo checkout: `lua53`, `SUPERCOLLIDER_VERSION=3.13.0`,
+`LIBMONOME_VERSION=1.4.9`, `LIBGPIOD_VERSION=1.6.4`, `NNG_VERSION=1.11`. **Todas
+siguen igual.**
 
 | Componente | Versión | Dónde se declara |
 |---|---|---|
@@ -260,6 +263,69 @@ grupo, que afecta al **orden de mezcla**, no al orden del audio.
 
 ---
 
+### 3.8 `addCommand` — el contrato de tipos
+
+```supercollider
+this.addCommand("cutoff",  "f",            { |msg| synth.set(\cutoff, msg[1]) });
+this.addCommand("mod_amp", "ffffffffffff", { |msg| synth.setn(\mod_amp, msg.drop(1)) });
+```
+
+| Carácter | Tipo |
+|---|---|
+| `i` | entero |
+| `f` | float |
+| `s` | string |
+| `a` | array (por **nombre** de control) |
+| `t` | toggle (booleano) |
+| `b` | blob |
+
+- `"f"` × N = un array de N floats. Un `addCommand` de array **es un solo viaje
+  OSC**, no N. Eso es lo que hace viable una matriz de modulación de 12×24.
+- **El formato DEBE coincidir con lo que Lua manda.** Si Lua manda 12 floats y el
+  formato es `"f"`, el motor lee 1 y el resto se pierde en silencio.
+- Desde Lua: `engine.cutoff(440)`, `engine.mod_amp(1, 0, 0, ...)`.
+
+### 3.9 `set` vs `setn` vs `setkr`
+
+```supercollider
+synth.set(\gain, 0.5)              // un control
+synth.setn(\mod_amp, [1,0,0,...])  // un NamedControl array
+synth.set(\x, y, \kr)              // fuerza control-rate
+```
+
+Un control que usas para audio **y** para control necesita `set(..., \kr)` explícito.
+
+### 3.10 Telemetría SC → Lua
+
+Hay dos caminos, y el que usa casi todo el mundo es el **peor**.
+
+**El habitual (doble salto):**
+```supercollider
+// en el SynthDef, 30 veces por segundo:
+SendReply.kr(Impulse.kr(30), '/update', [ ...24 valores... ]);
+
+// en el engine:
+osc_responder = OSCFunc({ |msg| NetAddr("127.0.0.1", 10111).sendMsg("/update", *msg.drop(3)); },
+                        '/update', nil);
+```
+
+`SendReply` va a **sclang**, que es un proceso **distinto** de matron. Entonces
+sclang reenvía a matron por otro socket. Dos procesos, dos saltos, y un `OSCFunc` en
+**modo promiscuo** (`recvID = nil`) que captura *cualquier* `/update`.
+
+**El idiomático: `addPoll`**
+
+`addPoll` se registra en `CronePollRegistry` y **matron lo pide directamente**. Un
+solo salto, sin `OSCFunc` promiscuo, sin reenvío.
+
+**Cuándo NO cambiar a poll:** si necesitas >30 Hz o muchos canales por mensaje.
+
+**Coste a recordar:** si construyes el `NetAddr` **dentro** del `OSCFunc`, reservas
+memoria nueva 30 veces por segundo, para siempre. Reutiliza el `NetAddr` que ya
+tienes como atributo del engine.
+
+---
+
 ## 4. Lua 5.3 en norns
 
 
@@ -416,68 +482,6 @@ en la SD **cada vez que el usuario guarda**. En una CM3 de 4 GB eso se llena rá
 Cambiar la visibilidad de un parámetro **no refresca el menú** por sí solo. Si
 depende de otro parámetro (un toggle que muestra/oculta un grupo), llama a
 `_menu.rebuild_params()`. No es API pública documentada, pero es el estándar de facto.
-
-
-### 3.8 `addCommand` — el contrato de tipos
-
-```supercollider
-this.addCommand("cutoff",  "f",            { |msg| synth.set(\cutoff, msg[1]) });
-this.addCommand("mod_amp", "ffffffffffff", { |msg| synth.setn(\mod_amp, msg.drop(1)) });
-```
-
-| Carácter | Tipo |
-|---|---|
-| `i` | entero |
-| `f` | float |
-| `s` | string |
-| `a` | array (por **nombre** de control) |
-| `t` | toggle (booleano) |
-| `b` | blob |
-
-- `"f"` × N = un array de N floats. Un `addCommand` de array **es un solo viaje
-  OSC**, no N. Eso es lo que hace viable una matriz de modulación de 12×24.
-- **El formato DEBE coincidir con lo que Lua manda.** Si Lua manda 12 floats y el
-  formato es `"f"`, el motor lee 1 y el resto se pierde en silencio.
-- Desde Lua: `engine.cutoff(440)`, `engine.mod_amp(1, 0, 0, ...)`.
-
-### 3.9 `set` vs `setn` vs `setkr`
-
-```supercollider
-synth.set(\gain, 0.5)              // un control
-synth.setn(\mod_amp, [1,0,0,...])  // un NamedControl array
-synth.set(\x, y, \kr)              // fuerza control-rate
-```
-
-Un control que usas para audio **y** para control necesita `set(..., \kr)` explícito.
-
-### 3.10 Telemetría SC → Lua
-
-Hay dos caminos, y el que usa casi todo el mundo es el **peor**.
-
-**El habitual (doble salto):**
-```supercollider
-// en el SynthDef, 30 veces por segundo:
-SendReply.kr(Impulse.kr(30), '/update', [ ...24 valores... ]);
-
-// en el engine:
-osc_responder = OSCFunc({ |msg| NetAddr("127.0.0.1", 10111).sendMsg("/update", *msg.drop(3)); },
-                        '/update', nil);
-```
-
-`SendReply` va a **sclang**, que es un proceso **distinto** de matron. Entonces
-sclang reenvía a matron por otro socket. Dos procesos, dos saltos, y un `OSCFunc` en
-**modo promiscuo** (`recvID = nil`) que captura *cualquier* `/update`.
-
-**El idiomático: `addPoll`**
-
-`addPoll` se registra en `CronePollRegistry` y **matron lo pide directamente**. Un
-solo salto, sin `OSCFunc` promiscuo, sin reenvío.
-
-**Cuándo NO cambiar a poll:** si necesitas >30 Hz o muchos canales por mensaje.
-
-**Coste a recordar:** si construyes el `NetAddr` **dentro** del `OSCFunc`, reservas
-memoria nueva 30 veces por segundo, para siempre. Reutiliza el `NetAddr` que ya
-tienes como atributo del engine.
 
 ---
 

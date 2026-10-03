@@ -1,3 +1,16 @@
+# Anatomía de ncoco
+
+> Instrumento tipo *async looper* para **monome norns** + grid, inspirado en
+> cocoquantus. Dos cintas de audio en loop, una matriz de modulación 12×24 y
+> **cuatro** modos de degradación de bits (8bit / 12bit / SBC / u-law).
+>
+> Documento **de proyecto**. Las reglas de la plataforma están en
+> [`NORNS_DEVELOPMENT_GUIDE.md`](./NORNS_DEVELOPMENT_GUIDE.md). El detalle de
+> los modos de bits, con su nivel de verificación, está en
+> [`BIT_MODES_FINDINGS.md`](./BIT_MODES_FINDINGS.md).
+>
+> Análisis del código: **2026-10-02**, revisado contra **v3.03** (`6c6cc02`).
+
 ---
 
 ## 1. Qué es, en términos de sonido
@@ -11,9 +24,9 @@ inyectada dentro del bucle. La diferencia con un looper de overdub clásico:
   que ya había.
 - Eso genera **saturación, acumulación de graves y degradación progresiva** de forma
   orgánica, en vez de un overdub lineal que solo crece.
-- Los **3 modos de bits** (8bit / μ-law / SBC) son una capa de **coloración de
-  digitalización** aplicada a la señal *dentro* del bucle: el grano y el ruido de
-  cuantización se realimentan y se acumulan.
+- Los **4 modos de bits** (8bit / 12bit / SBC / u-law) son una capa de
+  **coloración de digitalización** aplicada a la señal *dentro* del bucle: el grano y
+  el ruido de cuantización se realimentan y se acumulan.
 
 **Perfil sonoro esperado:** cálidas, con deriva de cinta, saturación gradual, y
 texturas que se van degradando con el tiempo. Es un instrumento de textura, no de
@@ -26,9 +39,9 @@ precisión.
 
 ```
 ncoco/
-├── ncoco.lua                  ← script principal (628 líneas)
+├── ncoco.lua                  ← script principal (916 líneas)
 ├── lib/
-│   ├── Engine_Ncoco.sc        ← motor DSP (630 líneas)
+│   ├── Engine_Ncoco.sc        ← motor DSP (650 líneas)
 │   ├── globals.lua            ← estado global compartido
 │   ├── param_set.lua          ← definición de todos los parámetros
 │   ├── grid_nav.lua           ← mapeo del grid + secuenciadores
@@ -37,8 +50,10 @@ ncoco/
 │   ├── sc_utils.lua           ← puente Lua → engine
 │   ├── storage.lua            ← PSET / total recall
 │   └── 16n.lua                ← soporte del Faderfox 16n
+├── tools/                     ← tests (`lua tools/verify_*.lua`)
 └── docs/
     ├── NORNS_DEVELOPMENT_GUIDE.md
+    ├── BIT_MODES_FINDINGS.md  ← los 4 modos de bits, con su verificación
     └── NCOCO_ANATOMY.md       ← este documento
 ```
 
@@ -66,7 +81,7 @@ include roto en norns te deja un script a medias y una pantalla en blanco sin
 explicación.
 
 > ⚠️ **Acoplamiento oculto:** `grid_nav.lua` hace su propio
-> `include('ncoco/lib/sc_utils')` (línea 26). Como `include` **tiene caché**, es la
+> `include('ncoco/lib/sc_utils')` (línea 55). Como `include` **tiene caché**, es la
 > misma tabla — no una copia. Funciona, pero `grid_nav` depende de un módulo que no
 > recibe como parámetro. Si alguien mueve `sc_utils`, `grid_nav` se rompe sin avisar.
 
@@ -214,61 +229,79 @@ E3 en el inspector de destino. 1.0 = normal, 0 = sin efecto, 2 = el doble.
 > fijas.
 
 
-# Anatomía de ncoco
-
-> Instrumento tipo *async looper* para **monome norns** + grid, inspirado en
-> cocoquantus. Dos cintas de audio en loop, una matriz de modulación 12×24 y tres
-> modos de degradación de bits (8bit / μ-law / SBC).
->
-> Documento **de proyecto**. Las reglas de la plataforma están en
-> [`NORNS_DEVELOPMENT_GUIDE.md`](./NORNS_DEVELOPMENT_GUIDE.md).
->
-> Análisis del código: **2026-10-02**, sobre el commit `97f4ec2` (rama `main`).
-
----
-
-## 6. Los 3 modos de bits
+## 6. Los 4 modos de bits
 
 
 Este es el corazón del color sonoro. **Verificado leyendo el código.**
 
 ### 6.1 Cómo se selecciona
 
-El parámetro `bitsL` / `bitsR` (menú: *"Bits 1"* / *"Bits 2"*) mapea a un número:
+El parámetro `bitsL` / `bitsR` (menú: *"Bits 1"* / *"Bits 2"*) es una opción con
+**cuatro** valores. El índice del menú (1–4) se convierte a índice de motor (0–3)
+en un único sitio, `lib/sc_utils.lua`:
 
-| Opción del menú | Valor enviado | Qué se activa |
-|---|---|---|
-| `8bit` | `bitDepth = 8` | cuantización de 8 bits |
-| `μ-law` | `bitDepth = 12` | companding μ-law |
-| `SBC` | `bitDepth = 14` | Sub-Band Coding |
-
-Y en el motor:
-```supercollider
-is8L     = bitDepthL < 10;
-is12L    = (bitDepthL >= 10) * (bitDepthL < 14);
-isAdpcmL = bitDepthL >= 14;
+```lua
+params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "SBC", "u-law"}, 1)
+params:set_action("bits"..s, function(x) SC.set_mode(i, x-1) end)
 ```
+
+| Opción del menú | `modeL` / `modeR` | Qué se activa |
+|---|---|---|
+| `8bit` | **0** | cuantización de 8 bits |
+| `12bit` | **1** | cuantización de 12 bits |
+| `SBC` | **2** | Sub-Band Coding |
+| `u-law` | **3** | companding μ-law |
+
+Y en el motor ese entero **se usa directamente como índice del `Select`**, sin flags
+ni aritmética:
+
+```supercollider
+writeL = Select.ar(modeL, [
+    Latch.ar(writeL.round(0.5 ** 8),  srTrigL),  // 0: 8-bit
+    Latch.ar(writeL.round(0.5 ** 12), srTrigL),  // 1: 12-bit
+    dpcmReconL,                                  // 2: SBC (sin Latch)
+    Latch.ar(muLawL, srTrigL)                    // 3: mu-law
+]);
+```
+
+> ⚠️ **Por qué el menú dice `u-law` y no `μ-law`.** La fuente integrada de norns
+> (6×13) solo cubre ASCII 32–126: no tiene glifo para U+03BC, así que `μ` se
+> renderiza como nada y el modo aparecía como `-law`. Verificado en el historial
+> del proyecto, que ya había corregido esto antes y se reintrodujo por error.
+> El detalle está en [`BIT_MODES_FINDINGS.md`](./BIT_MODES_FINDINGS.md) §4.
 
 ### 6.2 Qué hace cada modo
 
+Los tres modos cuantizadores comparten reloj (`srTrigL`); solo el SBC es
+feedforward. El "grano" viene de que `Latch` retiene el valor cuantizado **entre**
+muestras, y el reloj va **a la velocidad de reproducción** — como un sampler real.
+
 #### 8bit — `Latch.ar(writeL.round(0.5 ** 8), srTrigL)`
 
-- Cuantización a **8 bits** (256 niveles), retenida a la tasa del reloj de muestra.
+- Cuantización a **8 bits** (256 niveles), retenida a la tasa del reloj.
 - `0.5 ** 8` = paso de cuantización de 0.0039.
 - `srTrigL` es un reloj derivado de la velocidad de reproducción → **el grano se
-  mueve a velocidad de cinta**, como un sampler real.
-- Añade `PinkNoise` al 0.008 de amplitud.
-- **Color:** el "crunch" de 8 bits clásico. Gruesos, sucios, muy digital. El modo
-  más agresivo de los tres.
+  mueve a velocidad de cinta**.
+- `PinkNoise` al 0.008 (el más alto), realimentación filtrada a 7 kHz.
+- **Color:** el "crunch" de 8 bits clásico. Gruesos, sucios, muy digital. El más
+  agresivo de los cuatro.
 
-#### μ-law — `Latch.ar(muLawL, srTrigL)`
+#### 12bit — `Latch.ar(writeL.round(0.5 ** 12), srTrigL)`
 
-- Companding μ-law (G.711): comprime el rango dinámico en una curva logarítmica
-  antes de cuantizar.
-- `baseSR = 31250 Hz`, filtro de realimentación a 12.8 kHz.
-- `PinkNoise` al 0.004 (la mitad que en 8bit — el μ-law es más limpio por diseño).
-- **Color:** más suave que 8bit, con menos "siseo" en los niveles bajos. Es el modo
-  de voz/telefonía clásico. Más musical, menos sucio.
+- Cuantización a **12 bits**, mismo esquema de `Latch` que el 8bit pero con paso
+  `0.5 ** 12` (≈0.00024).
+- `baseSR = 31250 Hz`, realimentación a 12.8 kHz, `PinkNoise` al 0.004.
+- **Color:** transicion limpia entre el 8bit y el SBC. Es el modo más neutro de
+  los cuatro.
+
+#### u-law — `Latch.ar(muLawL, srTrigL)`
+
+- Companding logarítmico μ-law, el de voz/telefonía: una curva
+  `sign·log(1+255·|x|)/log(256)` antes de cuantizar a 255 pasos, y la inversa
+  después. Da **muchos más niveles donde el oído los nota** (los bajos).
+- `baseSR = 22000 Hz`, realimentación a 11.111 kHz, `PinkNoise` al 0.006.
+- **Color:** más suave que el 8bit, con menos siseo en niveles bajos. El más
+  musical de los cuatro.
 
 #### SBC — `dpcmReconL` (Sub-Band Coding, 2 bandas)
 
@@ -277,45 +310,47 @@ isAdpcmL = bitDepthL >= 14;
   - **Banda alta: 5 bits** (paso `2^-4`)
 - Recombina las dos bandas. Da **mucha resolución en el cuerpo** y poca en el brillo.
 - **48 kHz nativo** — sin recorte de banda.
-- `PinkNoise` al 0.002 (el más limpio).
-- **Color:** detalle fino, brillante, "digital-frío". El más sutil de los tres.
+- `PinkNoise` al 0.002 (el más limpio), realimentación a 16 kHz.
+- **Color:** detalle fino, brillante, "digital-frío". El más sutil de los cuatro.
 
 ### 6.3 Ruido y filtro por modo
 
-| Modo | Ruido | Filtro feedback | Reloj base |
-|---|---|---|---|
-| 8bit | 0.008 | 7 kHz | 16 kHz |
-| μ-law | 0.004 | 12.8 kHz | 31.25 kHz |
-| SBC | 0.002 | 16 kHz | 48 kHz |
+| Modo | Ruido | Filtro feedback | Reloj base | Latch |
+|---|---|---|---|---|
+| 8bit | 0.008 | 7 kHz | 16 kHz | sí |
+| 12bit | 0.004 | 12.8 kHz | 31.25 kHz | sí |
+| SBC | 0.002 | 16 kHz | 48 kHz | **no** |
+| u-law | 0.006 | 11.1 kHz | 22 kHz | sí |
 
-**Regla general:** cuanto más "digital" es el modo, más limpio. Es un degradado de
-8bit → μ-law → SBC, de **saturación a limpieza**.
+**Regla general:** el ruido baja de 8bit a SBC (0.008 → 0.004 → 0.002). Es un
+degradado de **saturación a limpieza**, pero **u-law rompe la monotonicidad**: con
+0.006 queda entre 8bit y 12bit en ruido, aunque su companding lo hace más limpio
+que un 12bit plano en los rangos que importan.
 
 ### 6.4 Detalle del SBC: sin `Latch`
 
 ```supercollider
-writeL = Select.ar(is8L + (is12L * 2) + (isAdpcmL * 3), [
-    Latch.ar(...),          // índice 0 — 8bit
-    Latch.ar(muLawL, ...),  // índice 1 — μ-law
-    Latch.ar(...),          // índice 2 — 12-bit lineal
-    dpcmReconL              // índice 3 — SBC, feedforward puro, sin Latch
+writeL = Select.ar(modeL, [
+    Latch.ar(writeL.round(0.5 ** 8),  srTrigL),  // 0: 8-bit
+    Latch.ar(writeL.round(0.5 ** 12), srTrigL),  // 1: 12-bit
+    dpcmReconL,                                  // 2: SBC (feedforward puro)
+    Latch.ar(muLawL, srTrigL)                    // 3: mu-law
 ]);
 ```
 
 El SBC **no retiene el valor**: recalcula la cuantización **en cada muestra** a
-48 kHz. Por eso es "nativo" y sin grano. Los modos 8bit y μ-law sí usan `Latch`, que
+48 kHz. Por eso es "nativo" y sin grano. Los otros tres sí usan `Latch`, que
 congela el valor entre muestras — de ahí su grano más audible.
 
-> ⚠️ **Punto de atención (verificado en código, requiere prueba de oído).**
-> El índice se calcula `is8L + (is12L * 2) + (isAdpcmL * 3)`. Con `bitDepth = 12`
-> obtenemos índice **2** (12-bit lineal). El índice **1** (μ-law) solo se alcanzaría
-> con `bitDepth = 10` u `11`, que **el menú nunca envía**.
->
-> **Lo que probablemente estás escuchando como "μ-law" es en realidad 12-bit lineal.**
-> Esto hay que confirmar en el dispositivo. Si el modo "μ-law" te suena a 12-bit plano
-> y no a companding de telefonía, el diagnóstico se confirma. La corrección sería
-> reindexar el `Select` (p. ej. `is8L + is12L + isAdpcmL * 2`), pero eso **cambia el
-> sonido** de ese modo y hay que hacerlo con criterio, no de un vistazo.
+> **Aviso sobre una afirmación antigua de este documento.** Hasta v2.x este
+> capítulo decía que el índice se calculaba con flags (`is8L + is12L*2 +
+> isAdpcmL*3`), lo que dejaba el modo u-law **inalcanzable** desde el menú, y
+> describía lo que sonabas como u-law como en realidad 12-bit lineal. Eso era
+> **una descripción del código de entonces, no del actual**. Hoy el motor recibe un
+> único entero `modeL`/`modeR` que indexa la tabla directamente, así que la
+> correspondencia menú→audio no puede desincronizarse.
+> Ver [`BIT_MODES_FINDINGS.md`](./BIT_MODES_FINDINGS.md) §1 y §3, y la fila
+> resuelta en §16.
 
 
 ---
@@ -614,16 +649,37 @@ WAV + los secuenciadores.
 ## 14. Referencia rápida de controles
 
 
-| Control | Acción |
-|---|---|
-| **E1** (main) | Volumen master |
-| **E2** (main) | Nivel de monitor |
-| **E3** (main) | Chaos global |
-| **E1/E2/E3** (edit L/R) | Filtro / Velocidad / Feedback |
-| **K1** (main) | Link estéreo L↔R |
-| **K2** (main) | Cambiar bits (8bit/μ-law/SBC) |
-| **K2/K3** (pétalo) | Cambiar Range / Shape |
-| **E3** (dest) | Ganancia de entrada del destino |
+**K2/K3 dependen de la pantalla activa.** Hasta v3.02 K2 cambiaba los modos de bits
+y K2/K3 no distinguían canal; hoy cada uno hace una cosa por contexto:
+
+| Control | Pantalla | Acción |
+|---|---|---|
+| **E1** | main | Volumen master |
+| **E2** | main | Nivel de monitor |
+| **E3** | main | Chaos global |
+| **K1** | main | Link estéreo L↔R |
+| **K2** | main | **REC COCO 1** (toggle `recL`) |
+| **K3** | main | **REC COCO 2** (toggle `recR`) |
+| **E1/E2/E3** | edit L/R | Filtro / Velocidad / Feedback |
+| **K3** | edit L (o link) | Cicla los **4 modos de bits** de L (y R si hay link) |
+| **K3** | edit R | Cicla los modos de bits de R |
+| **K2** | popup de fuente (pétalo) | Cambiar **Range** del pétalo |
+| **K3** | popup de fuente (pétalo) | Cambiar **Shape** del pétalo |
+| **K2/K3** | popup destino SKIP (6 / 13) | Cambiar modo skip (jump ↔ repeat) |
+| **E1** | inspector, destino SKIP | Chaos del stutter |
+| **E2** | inspector, destino SKIP | Rate del stutter |
+| **E3** | inspector de destino | Ganancia de la modulación de ese destino (`dest_gains`) |
+| **E3** | fuente + destino conectados | Mueve la conexión de la matriz (`patch[s][d]`) |
+
+Tres reglas que evitan sorpresas:
+
+- **K2/K3 no disparan grabación dentro de un popup.** Si hay un popup de fuente o
+  de destino abierto, son la función de esa pantalla, no REC. Es el mismo criterio
+  que usa el dibujo.
+- **Los modos de bits se ciclan con K3 en la pantalla de edición**, no en la main.
+  Hay cuatro: 8bit → 12bit → SBC → u-law.
+- **E3 hace dos cosas distintas** según el contexto: ganancia del destino en el
+  inspector, o intensidad de la conexión cuando ya hay fuente y destino elegidos.
 
 **Faders del 16n** (si está conectado):
 - Faders 1–6: frecuencia de los 6 pétalos
@@ -645,7 +701,7 @@ WAV + los secuenciadores.
 | **Jack** | un punto de conexión de la matriz |
 | **Modulación** | una fuente controlando un destino, con fuerza -1..+1 |
 | **Realimentación** | el feedback del looper: lo que sale vuelve a entrar |
-| **8bit / μ-law / SBC** | los tres modos de degradación de audio |
+| **8bit / 12bit / SBC / u-law** | los cuatro modos de degradación de audio |
 | **Flip** | invertir la dirección de reproducción |
 | **Skip / Stutter** | salto de posición / repetición rápida |
 | **DJ Filter** | filtro de barrido lowpass/highpass en la salida |
@@ -657,30 +713,36 @@ WAV + los secuenciadores.
 
 ## 16. Deuda técnica conocida
 
-*(Actualizado 2026-10-02. Los puntos marcados RESUELTOS ya no aplican: no los
+*(Actualizado para v3.03. Los puntos marcados RESUELTOS ya no aplican: no los
 "arregles" de nuevo — fueron análisis equivocados o bugs ya corregidos.)*
 
 | Severidad | Asunto | Estado |
 |---|---|---|
-| **Alta** | Índice del `Select` en los modos de bits — el u-law probablemente no se activa (§6.4) | Pendiente |
+| ~~Alta~~ | ~~Índice del `Select` en los modos de bits — el u-law probablemente no se activa~~ | **RESUELTO.** Ya no aplica: el motor usa un entero `modeL`/`modeR` (0–3) como índice directo del `Select`, sin flags. El §6.4 de este documento estaba **desactualizado** al respecto. Ver [`BIT_MODES_FINDINGS.md`](./BIT_MODES_FINDINGS.md) §1 y §3. |
 | ~~Alta~~ | ~~`add_group("COCO "..num, 18)` declaraba 18 con 17 params~~ | **RESUELTO** `1cb521e` → 17. El nombre de grupo NO cuenta. |
 | ~~Media~~ | ~~`storage.lua`: `for src=1, 10` con 12 fuentes~~ | **RESUELTO** `1cb521e` → 12. COCO 11/12 ya se restauran. |
 | ~~Media~~ | ~~`16n.lua`: byte `0x1f` pedido, `0x0f` comprobado~~ | **FALSO POSITIVO.** `0x0f` es correcto. Ver §7.2 de la guía. |
-| **Baja** | `normalize(msg.val, is_bipolar_param(p_name))` — el 2º argumento no se usa dentro de `normalize` | Pendiente |
-| **Baja** | `math.randomseed()` y el bucle de semillas de pétalos se anulan con `params:default()` justo después | Pendiente |
+| **Baja** | `normalize(msg.val, is_bipolar_param(p_name))` — el 2º argumento no se usa dentro de `normalize` (`lib/16n.lua:29`). La función devuelve siempre 0..1, así que el ajuste bipolar/a polar **no tiene efecto**. Verificado: el cuerpo de la función nunca lee `bipolar`. | Pendiente |
+| **Baja** | `math.randomseed(os.time())` (`ncoco.lua:439`) es inútil para lo que dice su comentario: las semillas aleatorias de los pétalos (488–491) las sobrescribe `params:default()` en la línea 496. Solo afecta al jitter visual de `quantussy.lua`, que no es lo que el comentario promete. | Pendiente |
 | ~~Baja~~ | ~~`GridNav.is_dirty` se escribe en 5 sitios pero nunca se lee~~ | **RESUELTO** `ea40a9a` (eliminado a propósito) |
-| **Baja** | `MAX_BRIGHT` / `FADER_BG` y otras constantes sin uso en `globals.lua` | Pendiente |
+| **Baja** | `FADER_BG` en `lib/globals.lua:24` no se usa en ningún sitio. Medido sobre las 4 constantes del módulo: `SPEED_TABLE` 2 usos, `TRAIL_SIZE` 4, `SCOPE_LEN` 18, `FADER_BG` **0**. (La versión antigua de esta fila citaba un `MAX_BRIGHT` que no existe en el código.) | Pendiente |
 | ~~Info~~ | ~~`Storage.save` serializa `double_click_timer` (una corrutina)~~ | **FALSO POSITIVO.** `tab.save` la salta sin fallar. Nada roto. |
 | **Info** | Secuenciador: grabación seguida de reproducción vacía, esporádica | **BUG REAL ENCONTRADO** `f1b8450`. Ver nota abajo. |
 
 ---
 
-### Nota sobre #14 (inspector)
+### Inspector de destinos: nota obsoleta retirada
 
-`tools/verify_p14_inspector.lua` da 12 correctos / 4 fallidos. Los 4 fallos son
-**solo de dibujo de la forma de onda** (destinos 5, 6 y 9): 1 píxel de más en el
-umbral y 4 segmentos de más en el trazo. **No afecta al sonido ni a los datos** —
-es geometría del dibujo. Preexistente, no introducido en v3.00.
+Este documento decía que `tools/verify_p14_inspector.lua` daba **12 correctos /
+4 fallidos** (1 píxel de más en el umbral y 4 segmentos de más en el trazo, en los
+destinos 5, 6 y 9), y lo merchantaba como deuda preexistente.
+
+**Medido hoy: 17 correctos, 0 fallidos.** La nota estaba desactualizada, así que
+ya no procede tratarlo como problema abierto.
+
+Lo que sí se puede afirmar sin especular: el inspector solo **dibuja** esas
+formas de onda a partir de los valores de la matriz. Un fallo ahí no puede alterar
+ni el audio ni los datos; como mucho, muestra mal un valor que ya era correcto.
 
 ### Nota sobre el secuenciador (v3.01)
 

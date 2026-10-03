@@ -11,7 +11,7 @@ cada numero, y que esta VERIFICADO frente a lo que es SUPUESTICION.
 
 ## 1. Como se selecciona el modo
 
-`lib/param_set.lua:127`
+`lib/param_set.lua:136`
 
 ```lua
 params:add_option("bits"..s, "Bits "..num, {"8bit", "12bit", "SBC", "u-law"}, 1)
@@ -24,7 +24,7 @@ Cadena completa:
 params (indice 1..4)
   -> SC.set_mode(i, x-1)                    lib/sc_utils.lua:56
   -> engine.modeL / engine.modeR            "i" (entero)
-  -> synth_core.set(\modeL, n)              Engine_Ncoco.sc:568
+  -> synth_core.set(\modeL, n)              Engine_Ncoco.sc:570
   -> Select.kr(modeL, [...])                index DIRECTO de las tablas
 ```
 
@@ -41,23 +41,23 @@ Valores extraidos de `lib/Engine_Ncoco.sc` en las lineas indicadas.
 
 | idx | Etiqueta | baseSR (Hz) | Filtro fijo (Hz) | Ruido | Bleed | Jitter SR | Cuantizacion | Linea |
 |-----|----------|-------------|------------------|-------|-------|-----------|--------------|-------|
-| 0 | `8bit`   | 16000       | 7000             | 0.008 | 0.0025 | 0.020     | `Latch(round(0.5**8))`  | 217, 384 |
-| 1 | `12bit`  | 31250       | 12800            | 0.004 | 0.0010 | 0.004     | `Latch(round(0.5**12))` | 217, 385 |
-| 2 | `SBC`    | 48000       | 16000            | 0.002 | 0.0030 | 0.010     | 2 bandas, 6.8 kHz      | 217, 386 |
-| 3 | `u-law`  | 22000       | 11111            | 0.006 | 0.0011 | 0.011     | companding log 8-bit   | 217, 387 |
+| 0 | `8bit`   | 16000       | 7000             | 0.008 | 0.0025 | 0.020     | `Latch(round(0.5**8))`  | 386 |
+| 1 | `12bit`  | 31250       | 12800            | 0.004 | 0.0010 | 0.004     | `Latch(round(0.5**12))` | 387 |
+| 2 | `SBC`    | 48000       | 16000            | 0.002 | 0.0030 | 0.010     | 2 bandas, 6.8 kHz      | 388 |
+| 3 | `u-law`  | 22000       | 11111            | 0.006 | 0.0011 | 0.011     | companding log 8-bit   | 389 |
 
 Tablas fuente (identicas para L y R, con `baseSR_R * 1.002`):
 
 ```supercollider
-// Engine_Ncoco.sc:214
+// Engine_Ncoco.sc:216
 noiseL = PinkNoise.ar(Select.kr(modeL, [0.008, 0.004, 0.002, 0.006]));
-// Engine_Ncoco.sc:217
-baseSR_L = Select.kr(modeL, [16000, 31250, 48000, 22000]);
 // Engine_Ncoco.sc:219
+baseSR_L = Select.kr(modeL, [16000, 31250, 48000, 22000]);
+// Engine_Ncoco.sc:221
 fixedFiltFreqL = Select.kr(modeL, [7000, 12800, 16000, 11111]);
-// Engine_Ncoco.sc:303
+// Engine_Ncoco.sc:305
 bleedL = ... * Select.kr(modeL, [0.0025, 0.001, 0.003, 0.0011]);
-// Engine_Ncoco.sc:367
+// Engine_Ncoco.sc:369
 srTrigL = ... * (1 + WhiteNoise.ar(Select.kr(modeL, [0.02, 0.004, 0.01, 0.011])));
 ```
 
@@ -73,7 +73,7 @@ Los tres valores comparables coinciden EXACTAMENTE:
 | Ruido 8-bit  | `is8L * 0.008`  | `0.008`  | coincide |
 | Filtro fijo   | `is8L * 7000`  | `7000`   | coincide |
 
-`2f85646:171,174,176` (logica con flags) frente a `Engine_Ncoco.sc:214,217,219`
+`2f85646:171,174,176` (logica con flags) frente a `Engine_Ncoco.sc:216,219,221`
 (logica con Select). Escribi un script que comparara ambas formas y los tres
 valores dan el mismo resultado.
 
