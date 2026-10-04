@@ -144,6 +144,10 @@ local UMBRAL   = math.floor((BW - 2) / 4) + 1
 local PTS_OND  = BW - 1
 local PIX_UMBRAL = UMBRAL + 1     -- umbral + 1er punto de la onda
 local SEG_OND    = PTS_OND - 1    -- segmentos = puntos - 1
+-- [v3.07] La linea de cero continua del inspector de DESTINOS anade 1 segmento
+-- (es un move + line + stroke) y 1 trazo mas. Antes no habia linea de cero: lo
+-- que se veia con nada cableado era la onda plana en cero.
+local LINEA_CERO = 1
 
 local function medir(id)
   H.reset()
@@ -155,16 +159,16 @@ end
 -- 5, 6, 7, 12, 13 y 14. El resto no.
 local p5, l5 = medir(5)
 eq(string.format('destino 5: %d de umbral + 1 inicial (derivado de la caja)', UMBRAL), p5, PIX_UMBRAL)
-eq(string.format('destino 5: %d segmentos de onda (derivado de la caja)', SEG_OND), l5, SEG_OND)
+eq(string.format('destino 5: %d segmentos de onda + 1 de la linea de cero', SEG_OND + LINEA_CERO), l5, SEG_OND + LINEA_CERO)
 
 local p6 = medir(6)
 eq('destino 6: tambien lleva umbral', p6, PIX_UMBRAL)
 
 local p9, l9, f9, s9 = medir(9)
 eq('destino 9: sin umbral, 1 pixel inicial', p9, 1)
-eq(string.format('destino 9: %d segmentos de onda (derivado de la caja)', SEG_OND), l9, SEG_OND)
+eq(string.format('destino 9: %d segmentos de onda + 1 de la linea de cero', SEG_OND + LINEA_CERO), l9, SEG_OND + LINEA_CERO)
 eq('destino 9: un solo relleno (el fondo)', f9, 1)
-eq('destino 9: 2 trazos (caja y onda)', s9, 2)
+eq('destino 9: 3 trazos (caja, linea de cero y onda)', s9, 3)
 
 local p24 = medir(24)
 eq('destino 24: sin umbral, 1 pixel inicial', p24, 1)

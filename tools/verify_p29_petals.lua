@@ -1,19 +1,22 @@
--- verify_p29_petals.lua -- bipolaridad y Track & Hold de los 6 petalos (v3.04)
+-- verify_p29_petals.lua -- bipolaridad y Track & Hold de los 6 petalos (v3.07)
 --
--- Los dos modos son opt-in y su default (0) reproduce v3.03 sample a sample. Eso
--- no se puede afirmar solo leyendo el menu: hay que fijar las tres cosas que lo
--- sostienen a la vez.
+-- [v3.07] El modo Sample & Hold se ELIMINO: el T&H ya no es opt-in, es lo unico
+-- que hay. De los dos modos de v3.04 solo queda pBipolar, que sigue siendo opt-in
+-- y cuyo default (0) reproduce v3.03 sample a sample. Eso no se puede afirmar
+-- solo leyendo el menu: hay que fijar las tres cosas que lo sostienen a la vez.
 --
---   1. pBipolar=0 / pGate=0 en la cabecera del SynthDef -> Select elige la rama 0
---   2. La rama 0 es la MISMA senal, no una aproximacion   -> pN / Latch(...)
+--   1. pBipolar=0 en la cabecera del SynthDef             -> Select elige la rama 0
+--   2. La rama 0 es la MISMA senal, no una aproximacion   -> pN
 --   3. El index se manda como entero                    -> addCommand con "i"
 --      (un float 0.9999999 como indice de Select cae fuera de rango)
 --
 -- Este test cubre ademas el presupuesto, que es la razon de disenarlo reutilizando
 -- p1..p6 y c1..c6 en vez de crear r1..r6 y cT1..cT6:
 --
---   vars 208->208 (+0)  LocalIn/LocalOut 10/10 (+0)  slots de array 312 (+0)
---   ugens 210->234 (+24)  6 Select + 6 Select + 6 Gate + 6 Lag
+--   vars 202   LocalIn/LocalOut 10/10   slots de array 312
+--   ugens 218. Trayectoria: 210 (v3.03) -> 234 (v3.04, +24 por los dos modos)
+--   -> 242 (v3.06, +8 por la etapa B de sources_sig) -> 218 (v3.07, -18 al
+--   eliminar el S&H: 6 Select + 6 Latch + 6 Trig1).
 --
 -- Si alguien quita el math.abs, cambia un default, o introduce vars nuevas, este
 -- test falla y obliga a re-auditar el presupuesto del motor.
@@ -48,6 +51,26 @@ local grid = strip_comments(read('lib/grid_nav.lua'))
 
 local function count(s, pat) local n = 0 for _ in s:gmatch(pat) do n = n + 1 end return n end
 
+-- [v3.07] El motor se comenta con // y NO con --, asi que el strip_comments() de
+-- mas arriba no le sirve. Para comprobar AUSENCIAS ("esto ya no esta") hace falta
+-- el fuente sin comentarios: si no, basta con que el nombre aparezca en la prosa
+-- para que el test se crea que el codigo sigue vivo. Ya ha pasado: el parrafo
+-- historico "Con pGate=0 la senal era..." hacia que pGate pareciese un arg mas.
+--
+-- Solo se usa para AUSENCIAS. Las comprobaciones de POSICION siguen usando sc
+-- entero, porque quitar comentarios cambia los numeros de linea.
+-- (Limitacion: no distingue // dentro de una cadena; el motor no tiene ninguna.)
+local NL3 = string.char(10)
+local function strip_sc(s)
+  local out = {}
+  for line in (s .. NL3):gmatch('([^' .. NL3 .. ']*)' .. NL3) do
+    local cut = line:find('//')
+    out[#out + 1] = cut and line:sub(1, cut - 1) or line
+  end
+  return table.concat(out, NL3)
+end
+local sc_code = strip_sc(sc)
+
 --------------------------------------------------------------------
 section('PRESUPUESTO: sin vars nuevas, sin canales nuevos')
 --------------------------------------------------------------------
@@ -79,7 +102,8 @@ local function slots_de_array(txt)
 end
 
 -- Baseline de v3.03. Si esto falla, RE-AUDITA el presupuesto antes de subirlo.
-eq('vars del motor = 208 (baseline v3.03, +0)', vars_de(sc), 208)
+-- [v3.07] Los 6 vars t1..t6 se van con el Latch del modo S&H: 208 -> 202.
+eq('vars del motor = 202 (baseline v3.03 208, -6 por el Latch eliminado)', vars_de(sc), 202)
 eq('slots de NamedControl = 312 (baseline v3.03, +0)', slots_de_array(sc), 312)
 check('LocalIn sigue en 10 canales', sc:match('LocalIn%.ar%(10%)') ~= nil)
 local lo = sc:match('LocalOut%.ar%(%[([^%]]*)%]%)')
@@ -92,7 +116,10 @@ eq('LocalOut = 10, cuadrados con LocalIn',
 -- al escribir la prosa pones algo con la forma "Algo.ar(", este numero se
 -- mueve sin que cambie ni una linea de codigo. Por eso el numero de v3.06 es
 -- 236 (los 2 K2A nuevos) y el COSTE REAL es +8 ugens (6 tanh + 2 K2A).
-eq('ugens (aprox. del patron) = 236 (baseline v3.03 210, +26)', count(sc, '%w+%.ar%(') + count(sc, '%w+%.kr%('), 236)
+-- [v3.07] Se van 18 ugens con el modo S&H: 6 Select de eleccion + 6 Latch +
+-- los 6 Trig1 (los relojes t1..t6, que solo existian para el Latch). 236 -> 218.
+eq('ugens (aprox. del patron) = 218 (baseline v3.03 210, -18 por el S&H eliminado)',
+   count(sc, '%w+%.ar%(') + count(sc, '%w+%.kr%('), 218)
 check('la etapa B tiene los 6 tanh que el patron NO ve (coste real +8 ugens)',
       count(sc, 'out%d%.tanh') == 6, 'tanh en la etapa B: ' .. count(sc, 'out%d%.tanh'))
 
@@ -101,11 +128,14 @@ section('MENU: los defaults son Abs y S&H')
 --------------------------------------------------------------------
 check('opcion Petal Polarity = {Abs, Bipolar}, default Abs',
       pset:match('add_option%("petal_polarity", "Petal Polarity", {"Abs", "Bipolar"}, 1%)') ~= nil)
-check('opcion Petal S&H/T&H = {S&H, T&H}, default S&H',
-      pset:match('add_option%("petal_gate_mode", "Petal S&H/T&H", {"S&H", "T&H"}, 1%)') ~= nil)
-check('las dos acciones traducen 1-based a 0/1 antes de llamar al motor',
-      pset:match('SC%.set_petal_polarity%(x%-1%)') ~= nil and
-      pset:match('SC%.set_petal_gate%(x%-1%)') ~= nil)
+-- [v3.07] El modo S&H se ELIMINA (decision del autor): la salida retentiva de los
+-- petalos es SIEMPRE Track & Hold. No se comprueba solo que falte la opcion,
+-- sino que no quede RASTRO de ella: ni el add_option ni su set_action.
+check('el parametro "Petal S&H/T&H" ya NO esta en el menu (ni opcion ni accion)',
+      pset:match('add_option%("petal_gate_mode"') == nil and
+      pset:match('set_action%("petal_gate_mode"') == nil)
+check('la polaridad sigue traduciendo 1-based a 0/1 antes de llamar al motor',
+      pset:match('SC%.set_petal_polarity%(x%-1%)') ~= nil)
 --[[ v3.05: LA COMPROBACION QUE HABIA AQUI ESTABA MAL Y BLOQUEABA EL ARREGLO.
 -- Decia, literalmente, "add_group(_, 7) es indice, no contador", y exigia que
 -- el 7 siguiera en su sitio. La creencia era FALSA: el segundo argumento de
@@ -139,14 +169,16 @@ end
 local l_globals = linea_de('add_group%("GLOBALS"')
 local l_tapeops = linea_de('add_group%("TAPE OPS"')
 local l_pol     = linea_de('add_option%("petal_polarity"')
-local l_gate    = linea_de('add_option%("petal_gate_mode"')
 
 check('existen los dos grupos que acotan GLOBALS (control negativo)',
       (l_globals ~= nil) and (l_tapeops ~= nil) and (l_tapeops > l_globals))
 check('petal_polarity esta DENTRO del grupo GLOBALS',
       (l_pol ~= nil) and (l_pol > l_globals) and (l_pol < l_tapeops))
-check('petal_gate_mode esta DENTRO del grupo GLOBALS',
-      (l_gate ~= nil) and (l_gate > l_globals) and (l_gate < l_tapeops))
+-- [v3.07] Control negativo del borrado: petal_gate_mode no debe quedar en el
+-- fuente (el comentario que explica la baja si se queda, pero linea_de() busca
+-- en pset, que va SIN comentarios, asi que aqui solo aparece el codigo).
+check('petal_gate_mode ya NO aparece en el codigo de param_set.lua',
+      linea_de('petal_gate_mode') == nil)
 
 --------------------------------------------------------------------
 section('SC: los setters recortan a 0/1')
@@ -160,19 +192,20 @@ engine.p_bipolar = function(v) sent = v end
 engine.p_gate     = function(v) sent = v end
 
 check('SC.set_petal_polarity existe', type(SC.set_petal_polarity) == 'function')
-check('SC.set_petal_gate existe', type(SC.set_petal_gate) == 'function')
+-- [v3.07] set_petal_gate se va con el modo S&H. engine.p_gate sigue puesto en el
+-- stub a proposito: si alguien lo volviera a llamar, el motor ya no lo entiende
+-- (no hay addCommand) y el enganche se veria aqui.
+check('SC.set_petal_gate ya NO existe (el modo S&H se elimino)', SC.set_petal_gate == nil)
 
-if SC.set_petal_polarity and SC.set_petal_gate then
+if SC.set_petal_polarity then
   SC.set_petal_polarity(0);  eq('polarity(0)  -> motor 0 (Abs)', sent, 0)
   SC.set_petal_polarity(1);  eq('polarity(1)  -> motor 1 (Bipolar)', sent, 1)
   -- Fallo hacia atras: si el valor no es exactamente 1, se elige la rama 0, que es
 -- la de v3.03. Un dato corrupto NO debe activar un modo que el usuario no pidio.
   SC.set_petal_polarity(7);  eq('polarity(7)  -> motor 0, fallback seguro', sent, 0)
   SC.set_petal_polarity(-3); eq('polarity(-3) -> motor 0, fallback seguro', sent, 0)
-  SC.set_petal_gate(0);     eq('gate(0)     -> motor 0 (S&H)', sent, 0)
-  SC.set_petal_gate(1);     eq('gate(1)     -> motor 1 (T&H)', sent, 1)
-  SC.set_petal_gate(99);    eq('gate(99)    -> motor 0, fallback seguro', sent, 0)
-  SC.set_petal_gate(-1);    eq('gate(-1)    -> motor 0, fallback seguro', sent, 0)
+  -- [v3.07] los cuatro casos de SC.set_petal_gate(0 / 1 / 99 / -1) se eliminan con
+  -- el modo S&H: ya no hay nada que conmutar hacia atras.
 end
 
 --------------------------------------------------------------------
@@ -245,7 +278,11 @@ if type(UI) == 'table' and UI.draw_scope then
   -- de una cadena Lua es justo el tipo de cosa que se corrompe al copiar.
   local NL = string.char(10)
 
-  local ARRIBA, CENTRO, ABAJO = 20, 32.5, 45   -- caja = rect(10,20,108,25)
+  -- [v3.07] La caja es rect(10,20,108,25): y=20, alto=25. El cero esta en
+  -- y + floor(25/2) = 32, ENTERO, porque una linea de 1 px tiene que caer en una
+  -- fila de pixel entera. En v3.06 era 32.5 y ademas se dibujaba con screen.pixel,
+  -- que en realidad es screen.rect(x, y, 1, 1) y norns pide enteros.
+  local ARRIBA, CENTRO, ABAJO = 20, 32, 45
 
   -- Dibuja el inspector del petalo 1 y devuelve las alturas de la onda.
   -- La caja se pinta con rect+stroke (no emite pixel ni line), asi que todo
@@ -329,11 +366,14 @@ if type(UI) == 'table' and UI.draw_scope then
         math.abs(min_b - min_cero) > 0.5,
         string.format('-0.4 -> y=%.4f   0 -> y=%.4f', min_b, min_cero))
 
-  -- 4. Linea de cero: presente en bipolar, ausente en Abs.
+  -- 4. Linea de cero: CONTINUA de 1 px en bipolar, ausente en Abs.
+  --    En v3.06 era una linea de PUNTOS (27 pixels). Ahora es un unico
+  --    move + line + stroke, que es lo que se ve: 1 px, sin ensancharse al
+  --    cruzarse con la onda.
   local _, pix_bip = analiza(0.0, 2)
   local _, pix_abs = analiza(0.0, 1)
-  check('bipolar dibuja la linea de cero (varios puntos en el centro)',
-        pix_bip > 5, 'puntos en el centro: ' .. pix_bip)
+  eq('bipolar dibuja la linea de cero como UNA sola linea continua (no 27 puntos)',
+     pix_bip, 1)
   eq('Abs NO dibuja linea de cero (ninguna pantalla cambia)', pix_abs, 0)
 
   -- 5. La misma caja: la onda bipolar no se sale del rect(10,20,108,25).
@@ -354,9 +394,13 @@ end
 section('MOTOR: los defaults siguen siendo el comportamiento de v3.03')
 --------------------------------------------------------------------
 -- Los defaults viven en la MISMA linea de la cabecera (pBipolar=0, pGate=0).
-check('pBipolar=0 y pGate=0 en la cabecera del SynthDef',
-      sc:match('%s*pBipolar%s*=%s*0%s*,%s*pGate%s*=%s*0') ~= nil,
-      'sin estos defaults el anillo arranca con signo en cada carga')
+-- [v3.07] pGate ya no existe: el unico modo con default es pBipolar=0 (Abs), con
+-- el que el anillo arranca igual que en v3.03.
+check('pBipolar=0 en la cabecera del SynthDef (el unico modo con default)',
+      sc:match('%s*pBipolar%s*=%s*0%s*,') ~= nil,
+      'sin este default el anillo arranca con signo en cada carga')
+check('pGate ya NO es un arg del SynthDef (se elimino el modo S&H)',
+      sc_code:match('%s*pGate%s*=%s*0') == nil, 'pGate sigue siendo un arg con default')
 
 --------------------------------------------------------------------
 section('MOTOR: las 6 ramas por defecto no son una aproximacion')
@@ -367,12 +411,19 @@ check('6 x polaridad: Select.ar(pBipolar, [pN, 2*pN - 1])',
 -- rama. Reintroducirla devuelve el pico bipolar al 61% del de Abs.
 check('ninguna rama conserva la forma vieja pN - 0.5',
       count(sc, 'Select%.ar%(pBipolar, %[p%d, p%d %- 0%.5%]%)') == 0)
-check('6 x T&H: Select.ar(pGate, [Latch(pN,tN), Lag(Gate(pN,b_phN>0.5),0.004)])',
-      count(sc, 'Select%.ar%(%s*pGate%s*,%s*%[Latch%.ar%(%s*p%d%s*,%s*t%d%s*%),%s*Lag%.ar%(%s*Gate%.ar%(%s*p%d%s*,%s*b_ph%d>0%.5%s*%),%s*0%.004%s*%)%]%)') == 6)
+-- [v3.07] El T&H ya no se elige: se aplica SIEMPRE, y en su forma DIRECTA. Se
+-- fueron el Select de eleccion, el Latch y los relojes tN. El reloj del gate sigue
+-- siendo la fase del propio petal, que es lo que da el 50/50 exacto.
+check('6 x T&H directo: cN = Lag.ar(Gate.ar(pN, b_phN>0.5), 0.004)',
+      count(sc, 'c%d=Lag%.ar%(Gate%.ar%(p%d,b_ph%d>0%.5%),0%.004%);') == 6)
 check('el reloj del T&H es la fase del propio petal (50/50 en b_ph > 0.5)',
       count(sc, 'Gate%.ar%(%s*p%d%s*,%s*b_ph%d>0%.5%s*%)') == 6)
-check('el par (valor, reloj) del T&H es el MISMO que ya usaba el Latch',
-      sc:match('Latch%.ar%(p6,t1%)') ~= nil and sc:match('Gate%.ar%(p6,b_ph1>0%.5%)') ~= nil)
+check('c1 sigue realimentandose con p6 (el ultimo petal del anillo)',
+      sc:match('c1=Lag%.ar%(Gate%.ar%(p6,b_ph1>0%.5%)') ~= nil)
+-- Y nada del modo S&H sobrevive en el CODIGO del motor.
+check('no queda ningun Latch de petalo (los que quedan son freezePos y modos de bit)',
+      count(sc_code, 'Latch%.ar%(p%d') == 0)
+check('no queda ningun Trig1 de reloj de petalo', count(sc_code, 'Trig1%.ar%(b_ph') == 0)
 
 --------------------------------------------------------------------
 section('MOTOR: el bipolar cubre el MISMO recorrido que Abs (v3.05)')
@@ -405,7 +456,9 @@ check('el cero esta donde Abs tiene su maximo (p=0.5 es el centro geometrico)',
 section('MOTOR: el index se manda como entero')
 --------------------------------------------------------------------
 check('addCommand("p_bipolar", "i", ...)', sc:match('addCommand%("p_bipolar", "i",') ~= nil)
-check('addCommand("p_gate", "i", ...)', sc:match('addCommand%("p_gate", "i",') ~= nil)
+-- [v3.07] p_gate se va del motor. Sin addCommand, cualquier llamada a engine.p_gate
+-- se quedaria colgada sin avisar: por eso se comprueba que no quede ninguna.
+check('addCommand("p_gate", "i", ...) ya NO esta', sc_code:match('addCommand%("p_gate", "i",') == nil)
 check('ninguno se manda como "f" (indice de Select vulnerable)',
       sc:match('addCommand%("p_[gb][a-z]*, "f",') == nil)
 

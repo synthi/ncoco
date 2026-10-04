@@ -1,4 +1,21 @@
--- ncoco.lua v3.06
+-- ncoco.lua v3.07
+-- CHANGELOG v3.07 (S&H FUERA, LINEA DE CERO CONTINUA, ETIQUETA T/H):
+-- 1. SE ELIMINA el modo Sample & Hold (decision del autor). La salida retentiva
+--    de los 6 petalos es SIEMPRE Track & Hold. Se van el parametro "Petal
+--    S&H/T&H" del menu (GLOBALS baja de 9 a 8), el arg pGate, el addCommand
+--    p_gate, SC.set_petal_gate, el Latch, el Select de eleccion y los seis
+--    relojes t1..t6.
+-- 2. AHORRO: -18 ugens y -6 vars. No cambia el sonido de Tri (que no usa cN) ni
+--    de Abs; solo afecta a quien usaba "Castle", que pasa de S&H a T&H.
+-- 3. DIBUJO: la linea de cero del scope bipolar pasa de puntos a una linea
+--    continua de 1 px, y se anade la MISMA linea al inspector de DESTINOS, que
+--    no tenia ninguna: lo que se veia era la onda plana en cero, que se
+--    deformaba en cuanto cableabas una fuente. Mismo nivel y mismo tramo en los
+--    dos, para que se lean igual.
+-- 4. DIBUJO: la etiqueta del inspector de petalos pasa de "S&H" a "T/H".
+-- 5. MIGRACION DE PSET: no hace falta. Con petal_gate_mode en 2 (T&H) sigue
+--    igual; en 1 (S&H) el parametro ya no existe y norns lo ignora.
+-- 6. VERSION: todo el proyecto pasa a 3.07.
 -- CHANGELOG v3.06 (SHAPE POR FIN MODULA, una regresion desde v2.52):
 -- 1. FIX: la matriz leia siempre la rama CRUDA del petal, asi que Shape
 --    (Tri | Castle) solo cambiaba lo que se dibujaba en el OSC /update. Con
@@ -216,7 +233,7 @@ engine.name = 'Ncoco'
 -- [v3.01] Version centralizada. Antes cada archivo llevaba su "vN.NN" y el
 -- banner del script se quedo en v2.14 durante toda la v3.00: no habia una
 -- unica fuente de verdad. Esto es lo que se muestra al arrancar.
-local NCOCO_VERSION = "3.06"
+local NCOCO_VERSION = "3.07"
 
 local function safe_include(name)
   local ok, result = pcall(include, name)

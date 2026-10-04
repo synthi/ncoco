@@ -1,6 +1,5 @@
--- lib/globals.lua v3.06
--- v3.06: SOLO la etiqueta de version. El codigo de este archivo NO se toco
---   (el unico cambio de codigo de v3.06 esta en Engine_Ncoco.sc).
+-- lib/globals.lua v3.07
+-- v3.07: SOLO la etiqueta de version. El codigo de este archivo NO se toco.
 -- CHANGELOG v3.01:
 -- 1. NEW: M.last_osc_time — marca del ultimo /update recibido de SC. La usa
 --    el detector de OSC parado en ncoco.lua. NO actua: solo registra.

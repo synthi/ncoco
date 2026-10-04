@@ -251,19 +251,26 @@ p1 = Select.ar(pBipolar, [p1, p1 * 2 - 1]);
 Que `p1` sea negativo significa que `p2`, que se calcula a partir de `p1`, también
 puede serlo: la polaridad se propaga sola por toda la cadena, sin código extra.
 
-**Petal S&H/T&H — `S&H` (por defecto) / `T&H`**
+**La salida retentiva: siempre Track & Hold (v3.07)**
 
-Cambia lo que hace la salida retentiva `c1`:
+> El modo `Sample & Hold` **se eliminó** en v3.07 (decisión del autor). El parámetro
+> global «Petal S&H/T&H» ya no existe y `c1` es siempre un T&H. Con él se fueron el
+> `Latch`, el `Select` de elección y los seis relojes `t1..t6`, que solo existían para
+> el `Latch`. Ahorro: **−18 ugens** y **−6 vars**. No hace falta migrar los PSET: el
+> valor guardado en `petal_gate_mode` simplemente ya no se consulta, y el default del
+> motor ahora *es* T&H.
 
-| | S&H | T&H |
-|---|---|---|
-| `Latch.ar(p6, t1)` | congela `p6` en cada disparo de `t1` | — |
-| `Gate.ar(p6, b_ph1>0.5)` | — | deja pasar `p6` mientras `b_ph1 > 0.5` |
-| `Lag.ar(…, 0.004)` | — | suaviza el borde del gate |
+```supercollider
+c1 = Lag.ar(Gate.ar(p6, b_ph1 > 0.5), 0.004);
+```
 
-El reloj es **exactamente 50/50** y sale de la fase del propio pétalo, la misma que ya
-generaba `t1`. El par (valor, reloj) no es nuevo: es el que el `Latch` ya usaba, así
-que no hay desincronización entre las dos salidas.
+| | Qué hace |
+|---|---|
+| `Gate.ar(p6, b_ph1>0.5)` | deja pasar `p6` mientras `b_ph1 > 0.5` (primera mitad del ciclo) |
+| `Lag.ar(…, 0.004)` | congela el último valor y suaviza el borde del gate (segunda mitad) |
+
+El reloj es **exactamente 50/50** y sale de la fase del propio pétalo, que ya se
+calculaba para la onda, así que no cuesta nada.
 
 > **Nota sobre el reloj 50/50.** Con `p1f = 0.5` el ciclo dura 2 s: T&H sigue la fuente
 > 1 s y la mantiene 1 s. Si subes mucho `p1f` la fase completa un ciclo antes que el
@@ -282,9 +289,11 @@ que no hay desincronización entre las dos salidas.
 | Paquetes OSC (`/update` a 30 Hz) | — | — | **+0** |
 | Unit generators | 210 | 234 | **+24** |
 
-Los +24 son 6 `Select` (polaridad) + 6 `Select` + 6 `Gate` + 6 `Lag`. **Select no
+Los +24 eran 6 `Select` (polaridad) + 6 `Select` + 6 `Gate` + 6 `Lag`. **Select no
 cortocircuita**: las dos ramas se evalúan siempre, así que en S&H el T&H también se
-calcula. Todos son ugens de una sola muestra.
+calculaba. Todos son ugens de una sola muestra. En v3.07 se media mitad: los **12
+ugens** del `Select` y el `Latch` se fueron con el modo S&H, y con ellos los 6
+`Trig1` (los relojes `t1..t6`).
 
 **Lo que costó v3.06** (la etapa B de `sources_sig`, ver §4.1): **+8 ugens**
 (6 `tanh` + 2 `K2A` duplicados), **+0 vars**, **+0 canales `LocalIn`/`LocalOut`**,

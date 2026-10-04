@@ -1,8 +1,8 @@
--- lib/quantussy.lua v3.06
--- v3.06: SOLO la etiqueta de version. El codigo NO se toco. Los petalos que
---   dibuja ya eran los CON SHAPE (el display manda outN desde antes de v3.05),
---   asi que v3.06, al pasar outN tambien a la matriz, no cambia ni un pixel de
---   esta pantalla: lo que se ve y lo que suena ya coinciden.
+-- lib/quantussy.lua v3.07
+-- v3.07: SOLO la etiqueta de version. El codigo NO se toco. Los petalos que
+--   dibuja son los CON SHAPE, que desde v3.06 son ademas los que suena. El
+--   hexagono se dimensiona por magnitud (math.abs): un tamano negativo no
+--   existe, asi que el centrado en el cero es cosa del scope (ui.lua).
 -- v3.05: SOLO la etiqueta de version. El codigo NO se toco: los hexagonos se
 --   dimensionan por magnitud (math.abs), que es correcto con bipolar porque un
 --   tamano negativo no existe. El centrado en el cero es cosa del scope del

@@ -1,6 +1,5 @@
--- lib/storage.lua v3.06
--- v3.06: SOLO la etiqueta de version. El codigo de este archivo NO se toco
---   (el unico cambio de codigo de v3.06 esta en Engine_Ncoco.sc).
+-- lib/storage.lua v3.07
+-- v3.07: SOLO la etiqueta de version. El codigo de este archivo NO se toco.
 -- v3.01 (continúa la FASE 4): BUG DEL SECUENCIADOR.
 -- Storage.load hacia `G.sequencers = data.sequencers`, pero run_sequencer()
 -- capturo `local s = G.sequencers[id]` al arrancar y guarda esa referencia.

@@ -1,6 +1,8 @@
--- lib/param_set.lua v3.06
--- v3.06: SOLO la etiqueta de version. El codigo NO se toco (el unico cambio de
---   codigo de v3.06 esta en Engine_Ncoco.sc, y no toca el menu).
+-- lib/param_set.lua v3.07
+-- v3.07: SE ELIMINA el parametro "Petal S&H/T&H" (decision del autor): la salida
+--   retentiva de los petalos es siempre Track & Hold. GLOBALS baja de 9 a 8.
+--   Los PSET existentes no se rompen: el parametro desaparece del menu y ya no
+--   se consulta.
 -- CHANGELOG v3.05 (GLOBALS declaraba 7 y contiene 9):
 -- 1. FIX: los dos params estrenados en v3.04 ("Petal Polarity" y "Petal
 --    S&H/T&H") quedaban FUERA del grupo GLOBALS y aparecian sueltos al final
@@ -49,11 +51,11 @@ local Params = {}
 function Params.init(SC, G, _16n)
   params:add_separator("Ncoco")
   
-  -- [v3.05] 9, no 7. GLOBALS contiene: Master Vol, Monitor Level, Global Chaos,
-  -- Tape Drift, Bleed Routing, DJ Filter Type, 16n Orientation, Petal Polarity
-  -- y Petal S&H/T&H. Con 7, los dos ultimos se salian del grupo. Lo vigila
-  -- tools/verify_p30_groups.lua: si anades un param aqui, sube el numero.
-  params:add_group("GLOBALS", 9)
+  -- [v3.07] 8, no 9. GLOBALS contiene: Master Vol, Monitor Level, Global Chaos,
+  -- Tape Drift, Bleed Routing, DJ Filter Type, 16n Orientation y Petal Polarity.
+  -- En v3.07 se elimino "Petal S&H/T&H", asi que el grupo baja de 9 a 8. Lo
+  -- vigila tools/verify_p30_groups.lua: si anades un param aqui, sube el numero.
+  params:add_group("GLOBALS", 8)
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   
@@ -87,11 +89,11 @@ function Params.init(SC, G, _16n)
   params:add_option("petal_polarity", "Petal Polarity", {"Abs", "Bipolar"}, 1)
   params:set_action("petal_polarity", function(x) SC.set_petal_polarity(x-1) end)
 
-  -- [v3.04] Salida S&H de los 6 petalos (global). S&H = Sample & Hold (v3.03).
-  -- T&H = Track & Hold: sigue la fuente durante la primera mitad del ciclo y
-  -- mantiene el ultimo valor en la segunda (reloj 50/50).
-  params:add_option("petal_gate_mode", "Petal S&H/T&H", {"S&H", "T&H"}, 1)
-  params:set_action("petal_gate_mode", function(x) SC.set_petal_gate(x-1) end)
+  -- [v3.07] "Petal S&H/T&H" SE ELIMINA (decision del autor). El modo Sample &
+  -- Hold desaparece y la salida retentiva de los 6 petalos es SIEMPRE Track &
+  -- Hold: sigue la fuente durante la primera mitad del ciclo y mantiene el
+  -- ultimo valor en la segunda (reloj 50/50 sobre la fase del propio petal).
+  -- El motor ya no tiene p_gate, asi que no queda nada que conmutar desde aqui.
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)

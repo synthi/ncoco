@@ -1,4 +1,18 @@
--- lib/ui.lua v3.06
+-- lib/ui.lua v3.07
+-- CHANGELOG v3.07 (LINEA DE CERO CONTINUA EN LOS DOS SCOPES + ETIQUETA T/H):
+-- 1. La linea de cero del scope bipolar pasa de PUNTOS a una linea continua de
+--    1 px, y se anade la MISMA linea al inspector de DESTINOS. Mismo nivel (4),
+--    mismo tramo y mismo modo de trazo: la misma linea en las dos pantallas.
+-- 2. POR QUE FALTABA EN DESTINOS: lo que se veia con nada cableado era la ONDA
+--    plana en cero, no una referencia, y se deformaba en cuanto conectabas una
+--    fuente. La discontinua del umbral de disparo se queda como estaba: es otra
+--    cosa (marca el umbral de FLIP/SKIP/REC).
+-- 3. screen.pixel es en realidad screen.rect(x, y, 1, 1) y norns pide enteros;
+--    con la caja de 25 px de alto el centro caia en 32.5. Ahora el cero es entero
+--    (math.floor) y la onda pivota sobre ese mismo valor. No se toca line_width:
+--    matron ya lo fija a 1 px al arrancar.
+-- 4. La etiqueta del inspector de petalos pasa de "S&H" a "T/H": el modo S&H ya
+--    no existe y la salida retentiva es siempre Track & Hold.
 -- v3.06: SOLO la etiqueta de version. El codigo NO se toco. El scope bipolar de
 --   v3.05 ya recibia outN por el OSC /update, asi que no se veia nada distinto:
 --   lo que se ve y lo que suena ya coinciden.
@@ -122,15 +136,24 @@ function UI.draw_scope(G, id, x, y, w, h, scale, bipolar)
 
   local zero_y, half_h, lo
   if bipolar then
-    zero_y, half_h, lo = y + h / 2, h / 2, -1
-    -- Linea de cero discontinua, al nivel mas tenue. El fill() es obligatorio:
-    -- si no, estos puntos se acumulan en el trazo de la onda y salen mas
-    -- gruesos, porque se dibujan por su borde (la misma trampa que se arreglo
-    -- en v3.00 Fase 3 en el inspector de destinos, donde el umbral se veia
-    -- "engordado").
-    screen.level(2)
-    for tx = x + 1, x + w - 1, 4 do screen.pixel(tx, zero_y) end
-    screen.fill()
+    -- [v3.07] El cero se dibuja como una linea CONTINUA de 1 px, no a puntos.
+    -- Dos motivos. (a) screen.pixel es en realidad screen.rect(x, y, 1, 1) y
+    -- norns pide coordenadas ENTERAS; con h impar el centro caia en 32.5 y la
+    -- linea de puntos salia descentrada. (b) Una linea de puntos se engorda al
+    -- cruzarse con la onda, porque se dibuja por su borde (la trampa de v3.00
+    -- Fase 3 en el inspector de destinos).
+    --
+    -- El grosor ya es 1 px de serie: matron llama a screen_line_width(1) al
+    -- arrancar (hello.cc), asi que NO hay que tocar line_width, cuyo FIXME
+    -- desaconseja hacerlo. Mismo nivel (4) y mismo tramo que el inspector de
+    -- destinos: la misma linea en las dos pantallas.
+    --
+    -- zero_y es ENTERO (math.floor) para que la linea caiga en una fila de pixel
+    -- entera y quede nitida, y la onda pivota sobre ese MISMO valor.
+    zero_y, half_h, lo = y + math.floor(h / 2), h / 2, -1
+    screen.level(4)
+    screen.move(x + 1, zero_y); screen.line(x + w - 1, zero_y)
+    screen.stroke()
   else
     zero_y, half_h, lo = y + h, h, 0
   end
@@ -142,7 +165,7 @@ function UI.draw_scope(G, id, x, y, w, h, scale, bipolar)
       local idx = (head - 1 - i - 1) % len + 1
       local val = util.clamp(hist[idx] * (scale or 1), lo, 1)
       local px = x + w - i
-      local py = zero_y - (val * half_h) 
+      local py = util.clamp(zero_y - (val * half_h), y, y + h) 
       if last_px then screen.move(last_px, last_py); screen.line(px, py) else screen.pixel(px, py) end
       last_px = px; last_py = py
     end
@@ -254,6 +277,24 @@ function UI.draw_dest_inspector(G, id)
   end
   screen.level(15)
   screen.rect(BOX_X, BOX_Y, BOX_W, BOX_H); screen.stroke()
+
+  -- [v3.07] Linea de cero CONTINUA de 1 px: la MISMA que dibuja UI.draw_scope en
+  -- los petalos, mismo nivel (4), mismo tramo y mismo modo de trazo.
+  --
+  -- POR QUE FALTABA: aqui no habia ninguna linea de referencia. Lo que se veia
+  -- con nada cableado era la ONDA plana en cero (sum sale 0 en todos los pixeles,
+  -- asi que los 119 puntos caen todos en el centro y forman una linea), y en
+  -- cuanto conectabas una fuente la curva se deformaba y la linea desaparecia.
+  -- No era una referencia: era el valor. Con esto el cero ya no depende de lo que
+  -- haya cableado, y las dos pantallas se leen igual.
+  --
+  -- OJO: esto NO es la linea discontinua de mas abajo. Aquella marca el umbral
+  -- de disparo de los destinos con Schmidt (FLIP/SKIP/REC) y esa se queda como
+  -- estaba: es informacion distinta.
+  local zc_y = BOX_Y + math.floor(BOX_H / 2)
+  screen.level(4)
+  screen.move(BOX_X + 1, zc_y); screen.line(BOX_X + BOX_W - 1, zc_y)
+  screen.stroke()
   
   if id==5 or id==6 or id==7 or id==12 or id==13 or id==14 then
      local thresh_y = BOX_Y + 11
@@ -335,7 +376,7 @@ function UI.draw_petal_inspector(G, id)
   local ch=params:get("p"..id.."chaos") or 0
   local shp_idx=params:get("p"..id.."shape") or 1
   local rng_idx=params:get("p"..id.."range") or 1
-  local shp = shp_idx==1 and "TRI" or "S&H"
+  local shp = shp_idx==1 and "TRI" or "T/H"
   local rng = rng_idx==1 and "LFO" or "AUD"
 
   screen.level(0); screen.rect(0,0,128,64); screen.fill(); screen.level(15)

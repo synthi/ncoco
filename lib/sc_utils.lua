@@ -1,6 +1,7 @@
--- lib/sc_utils.lua v3.06
--- v3.06: SOLO la etiqueta de version. El codigo de este archivo NO se toco
---   (el unico cambio de codigo de v3.06 esta en Engine_Ncoco.sc).
+-- lib/sc_utils.lua v3.07
+-- v3.07: SE ELIMINA SC.set_petal_gate, con el modo Sample & Hold. El motor ya
+--   no tiene p_gate y la salida retentiva de los petalos es siempre Track &
+--   Hold, asi que no queda nada que conmutar desde Lua.
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:
@@ -101,13 +102,10 @@ function SC.set_petal_polarity(mode)
   if engine.p_bipolar then engine.p_bipolar(mode == 1 and 1 or 0) end
 end
 
--- [v3.04] Modo de la salida Sample & Hold de los 6 petalos.
--- mode 0 = S&H -> Latch (comportamiento exacto de v3.03)
--- mode 1 = T&H -> sigue la fuente en la primera mitad del ciclo y la mantiene en
---               la segunda (reloj 50/50 sobre la fase del propio petal).
-function SC.set_petal_gate(mode)
-  if engine.p_gate then engine.p_gate(mode == 1 and 1 or 0) end
-end
+-- [v3.07] SC.set_petal_gate SE ELIMINA junto con el modo Sample & Hold. El motor
+-- ya no tiene p_gate y la salida retentiva de los petalos es siempre Track &
+-- Hold, asi que no queda nada que conmutar desde Lua. El selector vivia entero
+-- en el motor (un Select por petalo), no en este archivo.
 
 function SC.set_preamp(id, val)
   local cmd = id==1 and "preampL" or "preampR"
