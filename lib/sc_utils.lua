@@ -1,4 +1,4 @@
--- lib/sc_utils.lua v3.03
+-- lib/sc_utils.lua v3.04
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:
@@ -86,6 +86,25 @@ end
 function SC.set_petal_shape(id, val)
   local cmd = "p"..id.."shape"
   if engine[cmd] then engine[cmd](val) end
+end
+
+-- [v3.04] Polaridad global de los 6 petalos.
+-- mode 0 = Abs      -> rampa rectificada 0..1 (comportamiento exacto de v3.03)
+-- mode 1 = Bipolar  -> rampa con signo -0.5..+0.5, acoplamiento bidireccional
+-- El index llega como 0/1 desde params:add_option. Fallo hacia atras: SOLO el 1
+-- exacto activa el modo nuevo; cualquier otro valor (basura en un PSET, un param
+-- eliminado, un nil) elige la rama 0, que es el comportamiento de v3.03. Un dato
+-- corrupto no debe dejar al motor en un modo que el usuario no pidio.
+function SC.set_petal_polarity(mode)
+  if engine.p_bipolar then engine.p_bipolar(mode == 1 and 1 or 0) end
+end
+
+-- [v3.04] Modo de la salida Sample & Hold de los 6 petalos.
+-- mode 0 = S&H -> Latch (comportamiento exacto de v3.03)
+-- mode 1 = T&H -> sigue la fuente en la primera mitad del ciclo y la mantiene en
+--               la segunda (reloj 50/50 sobre la fase del propio petal).
+function SC.set_petal_gate(mode)
+  if engine.p_gate then engine.p_gate(mode == 1 and 1 or 0) end
 end
 
 function SC.set_preamp(id, val)

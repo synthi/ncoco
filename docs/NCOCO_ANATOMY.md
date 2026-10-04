@@ -178,15 +178,84 @@ p1    = ((b_ph1 + (fb_petals[5] * p1c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
 - `pNc` = caos (individual + global), aplicado como `pow(3)` → **el caos solo
   actúa en el extremo del rango**, no de forma lineal
 - `fb_petals[n-1]` = realimentación del pétalo anterior
-- `.abs` al final → **salida siempre positiva** (0..1), nunca bipolar
+- `.abs` al final → **en modo Abs (por defecto) la salida es 0..1**, y la realimentación
+  del anillo es unidireccional. En modo Bipolar ver §4.2.
 
 **La forma (Tri / Castle):**
 ```supercollider
-c1 = Latch.ar(p6, t1);              // S&H: congela p6 cuando t1 dispara
+c1 = Select.ar(pGate,[Latch.ar(p6,t1), Lag.ar(Gate.ar(p6,b_ph1>0.5),0.004)]);
 out1 = Select.ar(p1shape, [p1, c1]);
 ```
-- `p1shape = 0` → triángulo suave
-- `p1shape = 1` → sample & hold (escalones) → "Castle"
+- `p1shape = 0` → triángulo suave (la rampa `p1`)
+- `p1shape = 1` → escalones → "Castle" (la salida retentida `c1`)
+
+### 4.2 Los dos modos globales de los pétalos (v3.04)
+
+Dos opciones globales en el menú, en el grupo **GLOBALS**, que afectan a los 6
+pétalos a la vez. **Ambas son opt-in: su valor por defecto es la de v3.03 y la señal
+resultante es bit-idéntica.**
+
+**Petal Polarity — `Abs` (por defecto) / `Bipolar`**
+
+Después de la rampa rectificada se re-centra reutilizando la misma variable:
+
+```supercollider
+p1 = ((b_ph1 + (fb_petals[5] * p1c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
+p1 = Select.ar(pBipolar, [p1, p1 - 0.5]);
+```
+
+| | Abs | Bipolar |
+|---|---|---|
+| Rango | 0..1 | −0.5..+0.5 |
+| Acoplamiento del anillo |unidireccional | **con signo, bidireccional** |
+| El "cero" | un pulso | una envolvente 50/50 |
+
+Que `p1` sea negativo significa que `p2`, que se calcula a partir de `p1`, también
+puede serlo: la polaridad se propaga sola por toda la cadena, sin código extra.
+
+**Petal S&H/T&H — `S&H` (por defecto) / `T&H`**
+
+Cambia lo que hace la salida retentiva `c1`:
+
+| | S&H | T&H |
+|---|---|---|
+| `Latch.ar(p6, t1)` | congela `p6` en cada disparo de `t1` | — |
+| `Gate.ar(p6, b_ph1>0.5)` | — | deja pasar `p6` mientras `b_ph1 > 0.5` |
+| `Lag.ar(…, 0.004)` | — | suaviza el borde del gate |
+
+El reloj es **exactamente 50/50** y sale de la fase del propio pétalo, la misma que ya
+generaba `t1`. El par (valor, reloj) no es nuevo: es el que el `Latch` ya usaba, así
+que no hay desincronización entre las dos salidas.
+
+> **Nota sobre el reloj 50/50.** Con `p1f = 0.5` el ciclo dura 2 s: T&H sigue la fuente
+> 1 s y la mantiene 1 s. Si subes mucho `p1f` la fase completa un ciclo antes que el
+> `Lag` de 4 ms termine de asentarse — con frecuencias de audio el T&H tiende al LFO
+> continuo. Es el comportamiento esperado de un T&H real, no un fallo.
+
+**Por qué se reescriben las variables en vez de crear otras.** El motor ya está al
+**72% de `MAX_CONTROL`** por los 24 `NamedControl` de la matriz de modulación, y
+`p1..p6` / `c1..c6` ya existen en la declaración de vars. Reutilizarlas cuesta:
+
+| Recurso | v3.03 | v3.04 | Δ |
+|---|---|---|---|
+| Vars del SynthDef | 208 | 208 | **+0** |
+| Slots de control | 312 (+ ~56 sueltos) | 314 | **+2** |
+| Canales `LocalIn` / `LocalOut` | 10 / 10 | 10 / 10 | **+0** |
+| Paquetes OSC (`/update` a 30 Hz) | — | — | **+0** |
+| Unit generators | 210 | 234 | **+24** |
+
+Los +24 son 6 `Select` (polaridad) + 6 `Select` + 6 `Gate` + 6 `Lag`. **Select no
+cortocircuita**: las dos ramas se evalúan siempre, así que en S&H el T&H también se
+calcula. Todos son ugens de una sola muestra.
+
+**Fallo hacia atrás.** Solo el `1` exacto de la opción activa el modo nuevo; cualquier
+otro valor (un PSET corrupto, un parámetro eliminado, un `nil`) elige la rama 0, que
+es el comportamiento de v3.03. Un dato corrupto no debe dejar el motor en un modo que
+el usuario no pidió.
+
+> **Al recompilar.** Añadir controles al SynthDef obliga a `engine.load()`, que
+> **re-asigna los buffers de 60 s y corta el audio**. La primera vez que arranques con
+> esta versión hay que recargar la cinta del disco.
 
 **Por qué 6 en cadena y no en paralelo:** la cadena hace que el conjunto se comporte
 como **un sistema caótico único** en vez de 6 LFO independientes. Es la diferencia
@@ -519,6 +588,16 @@ G.sources_val[12]    = args[24]      -- coco 2
 > (args 17–18) para las fuentes de modulación. **Son el mismo dato duplicado.**
 > No es un bug, pero es una tentación de bug futuro si alguien cambia el orden.
 
+> ⚠️ **`out1..out6` (args 9–14) pueden llegar NEGATIVOS desde v3.04.** En modo
+> Petal Polarity = Bipolar el pétalo es una señal con signo (−0.5..+0.5). Los tres
+> consumidores de `sources_val[1..6]` están protegidos:
+> - `grid_nav.lua` — usa `math.abs()` en sus dos usos
+> - `ui.lua` — `draw_scope` pasa el valor por `util.clamp(…, 0, 1)`
+> - `quantussy.lua` — normaliza con `math.abs()` en su única lectura
+>
+> `sources_val[7]` y `[8]` (envolventes, args 15–16) **no** son pétalos: no les
+> afecta el modo bipolar. Por eso el aviso de nivel de `ui.lua` sigue usando 0.95.
+
 **Latencia total del enlace:** 1 bloque de SC (1.33 ms) + 1/30 s del reloj (33 ms)
 + OSC. **La telemetría visual va ~35 ms por detrás del audio.** Irrelevante para lo
 que hace, pero explica por qué los visualizadores "se retrasan" un poco.
@@ -582,6 +661,7 @@ pasadas que crea un efecto de movimiento:
 - **Chaos** → añade vibración aleatoria a la posición + rotación
 
 ```lua
+local val = math.abs(G.sources_val[i] or 0);   -- [v3.04] bipolar puede llegar negativo
 local size = util.linlin(0, 1, 1, 9, val);
 local bright = math.floor(util.linlin(0, 1, 4, 15, val));
 ```
@@ -589,6 +669,10 @@ local bright = math.floor(util.linlin(0, 1, 4, 15, val));
 El brillo del hexágono es directamente el valor del pétalo. **Los 6 hexágonos
 forman la parte más bonita de la interfaz** y son la referencia visual principal
 para entender la modulación.
+
+> El `math.abs` de la primera línea es lo que permite que el mismo dibujo funcione en
+> Abs y en Bipolar: en bipolar el pétalo oscila entre −0.5 y +0.5, y sin normalizar
+> `size` saldría negativo y el hexágono desaparecería de la pantalla.
 
 ### 11.2 Radar de cinta
 

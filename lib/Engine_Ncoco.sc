@@ -1,4 +1,19 @@
-// Engine_Ncoco.sc v3.03
+// Engine_Ncoco.sc v3.04
+// v3.04 PETAL SHAPE - dos modos opt-in, comportamiento por defecto IDENTICO:
+// 1. pBipolar (0=Abs, por defecto | 1=Bipolar). Tras la rampa rectificada (.abs)
+//    se re-centra a [-0.5,+0.5] con Select.kr, de modo que el acoplamiento del
+//    anillo pasa a con signo y el "cero" deja de ser un pulso para ser una
+//    envolvente 50/50. Se REUTILIZA p1..p6 -> 0 vars nuevos. Con pBipolar=0 la
+//    senal es bit-identica a v3.03.
+// 2. pGate (0=S&H, por defecto | 1=Track & Hold). En T&H cada cN sigue pN durante
+//    la primera mitad del ciclo de b_phN (reloj 50/50 exacto) y congela el ultimo
+//    valor en la segunda. El par (valor, reloj) es el MISMO que ya usaba el Latch:
+//    c1 toma p6 con el reloj de b_ph1. Se REUTILIZA c1..c6 -> 0 vars nuevos.
+//    Con pGate=0 la senal es bit-identica a v3.03.
+// 3. Select NO cortocircuita: ambas ramas se evaluan siempre. +24 ugen
+//    (6 Select de polaridad + 6 Select + 6 Gate + 6 Lag de T&H), todos de una
+//    sola muestra. No se tocan LocalIn/LocalOut (10/10, cuadrados) ni el OSC
+//    /update de 30 Hz, asi que el presupuesto de OSC no cambia.
 // v3.01: SOLO se actualizó la etiqueta de versión (unificación del proyecto).
 //   El CÓDIGO del motor NO se tocó en v3.01.
 // v3.00 FASE 2 - BIT MODES: single per-mode selector (see BIT_MODES_FINDINGS.md).
@@ -121,6 +136,9 @@ Engine_Ncoco : CroneEngine {
 			p1f=0.5, p2f=0.6, p3f=0.7, p4f=0.8, p5f=0.9, p6f=1.0,
 			p1chaos=0, p2chaos=0, p3chaos=0, p4chaos=0, p5chaos=0, p6chaos=0,
 			p1shape=0, p2shape=0, p3shape=0, p4shape=0, p5shape=0, p6shape=0,
+			// [v3.04] pBipolar: 0=Abs (rectificado) | 1=Bipolar (con signo)
+			//          pGate:    0=S&H               | 1=Track & Hold
+			pBipolar=0, pGate=0,
 			
             globalChaos=0, 
             coco1OutMode=0, coco2OutMode=0, 
@@ -239,15 +257,34 @@ Engine_Ncoco : CroneEngine {
 			mod_p6=((sources_sig*mod_p6_Amts).sum * dest_gains[19] * 10);
 
 			b_ph1 = Phasor.ar(0, (p1f + mod_p1).abs * SampleDur.ir, 0, 1); t1 = Trig1.ar(b_ph1 > 0.05, SampleDur.ir); 
-			p1 = ((b_ph1 + (fb_petals[5] * p1c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
-			b_ph2 = Phasor.ar(0, (p2f + mod_p2).abs * SampleDur.ir, 0, 1); t2 = Trig1.ar(b_ph2 > 0.05, SampleDur.ir); p2 = ((b_ph2 + (p1 * p2c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
-			b_ph3 = Phasor.ar(0, (p3f + mod_p3).abs * SampleDur.ir, 0, 1); t3 = Trig1.ar(b_ph3 > 0.05, SampleDur.ir); p3 = ((b_ph3 + (p2 * p3c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
-			b_ph4 = Phasor.ar(0, (p4f + mod_p4).abs * SampleDur.ir, 0, 1); t4 = Trig1.ar(b_ph4 > 0.05, SampleDur.ir); p4 = ((b_ph4 + (p3 * p4c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
-			b_ph5 = Phasor.ar(0, (p5f + mod_p5).abs * SampleDur.ir, 0, 1); t5 = Trig1.ar(b_ph5 > 0.05, SampleDur.ir); p5 = ((b_ph5 + (p4 * p5c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
-			b_ph6 = Phasor.ar(0, (p6f + mod_p6).abs * SampleDur.ir, 0, 1); t6 = Trig1.ar(b_ph6 > 0.05, SampleDur.ir); p6 = ((b_ph6 + (p5 * p6c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
+			// [v3.04] Polaridad. La rampa rectificada se calcula igual que en v3.03 y
+			// despues se RE-CENTRA reutilizando la misma variable: pBipolar=0 devuelve
+			// la propia pN (abs, 0..1); pBipolar=1 devuelve pN-0.5 (con signo, +-0.5).
+			// Reutilizar pN en vez de crear rN..rN cuesta 0 vars, que es justo el
+			// presupuesto que ya se toco una vez (ver nota v3.04 en la cabecera).
+			// Beneficio: p1 con signo alimenta directamente el acoplamiento de p2, asi
+			// que la bipolaridad se propaga sola por todo el anillo.
+			p1 = ((b_ph1 + (fb_petals[5] * p1c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p1 = Select.ar(pBipolar, [p1, p1 - 0.5]);
+			b_ph2 = Phasor.ar(0, (p2f + mod_p2).abs * SampleDur.ir, 0, 1); t2 = Trig1.ar(b_ph2 > 0.05, SampleDur.ir); p2 = ((b_ph2 + (p1 * p2c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p2 = Select.ar(pBipolar, [p2, p2 - 0.5]);
+			b_ph3 = Phasor.ar(0, (p3f + mod_p3).abs * SampleDur.ir, 0, 1); t3 = Trig1.ar(b_ph3 > 0.05, SampleDur.ir); p3 = ((b_ph3 + (p2 * p3c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p3 = Select.ar(pBipolar, [p3, p3 - 0.5]);
+			b_ph4 = Phasor.ar(0, (p4f + mod_p4).abs * SampleDur.ir, 0, 1); t4 = Trig1.ar(b_ph4 > 0.05, SampleDur.ir); p4 = ((b_ph4 + (p3 * p4c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p4 = Select.ar(pBipolar, [p4, p4 - 0.5]);
+			b_ph5 = Phasor.ar(0, (p5f + mod_p5).abs * SampleDur.ir, 0, 1); t5 = Trig1.ar(b_ph5 > 0.05, SampleDur.ir); p5 = ((b_ph5 + (p4 * p5c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p5 = Select.ar(pBipolar, [p5, p5 - 0.5]);
+			b_ph6 = Phasor.ar(0, (p6f + mod_p6).abs * SampleDur.ir, 0, 1); t6 = Trig1.ar(b_ph6 > 0.05, SampleDur.ir); p6 = ((b_ph6 + (p5 * p6c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p6 = Select.ar(pBipolar, [p6, p6 - 0.5]);
 			
-			c1=Latch.ar(p6,t1); c2=Latch.ar(p1,t2); c3=Latch.ar(p2,t3);
-			c4=Latch.ar(p3,t4); c5=Latch.ar(p4,t5); c6=Latch.ar(p5,t6);
+			// [v3.04] pGate: 0 = Sample & Hold (exactamente v3.03), 1 = Track & Hold.
+			// T&H sigue pN mientras b_phN este por encima de 0.5 y congela el ultimo
+			// valor en la segunda mitad: reloj de servicio 50/50 exacto, tomado de la
+			// propia fase del petal (misma fuente que ya generaba tN). El par
+			// (valor, reloj) es identico al que ya usaba el Latch: c1 toma p6 con el
+			// reloj de b_ph1. Lag de 4 ms suaviza el borde del gate.
+			// Select no cortocircuita, asi que en S&H el T&H tambien se calcula:
+			// +18 ugen (Select + Gate + Lag), todos de una sola muestra.
+			c1=Select.ar(pGate,[Latch.ar(p6,t1), Lag.ar(Gate.ar(p6,b_ph1>0.5),0.004)]);
+			c2=Select.ar(pGate,[Latch.ar(p1,t2), Lag.ar(Gate.ar(p1,b_ph2>0.5),0.004)]);
+			c3=Select.ar(pGate,[Latch.ar(p2,t3), Lag.ar(Gate.ar(p2,b_ph3>0.5),0.004)]);
+			c4=Select.ar(pGate,[Latch.ar(p3,t4), Lag.ar(Gate.ar(p3,b_ph4>0.5),0.004)]);
+			c5=Select.ar(pGate,[Latch.ar(p4,t5), Lag.ar(Gate.ar(p4,b_ph5>0.5),0.004)]);
+			c6=Select.ar(pGate,[Latch.ar(p5,t6), Lag.ar(Gate.ar(p5,b_ph6>0.5),0.004)]);
 			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
 			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
 			
@@ -592,6 +629,12 @@ srTrigR = Impulse.ar((baseSR_R * finalRateR.abs).clip(100, 48000) * (1 + WhiteNo
 		this.addCommand("p4shape", "f", { |msg| synth_core.set(\p4shape, msg[1]) });
 		this.addCommand("p5shape", "f", { |msg| synth_core.set(\p5shape, msg[1]) });
 		this.addCommand("p6shape", "f", { |msg| synth_core.set(\p6shape, msg[1]) });
+
+		// [v3.04] Tipo "i" a proposito: pBipolar y pGate son indices de Select. Un
+		// float casi-1 (0.9999999) caeria fuera de rango en el indice; "i" garantiza
+		// exactamente 0.0 o 1.0. Mismo criterio que modeL/R, recL/R, coco1_out_mode.
+		this.addCommand("p_bipolar", "i", { |msg| synth_core.set(\pBipolar, msg[1]) });
+		this.addCommand("p_gate", "i", { |msg| synth_core.set(\pGate, msg[1]) });
 
         // PARAMS -> OUT
 		this.addCommand("filtL", "f", { |msg| synth_out.set(\filtL, msg[1]) });

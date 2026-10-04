@@ -1,4 +1,4 @@
--- lib/quantussy.lua v3.03
+-- lib/quantussy.lua v3.04
 -- CLEANUP v3.00 FASE 1:
 -- 1. FIX (B8): a missing petal coordinate used to `return` out of the whole
 --    draw loop, killing the other 5 petals. It now skips only that petal.
@@ -45,7 +45,11 @@ function Q.draw(G)
     local p = Q.coords[i]
     if p then -- Safety: a broken petal must not abort the other 5
     
-      local val = G.sources_val[i] or 0
+      -- [v3.04] En modo Bipolar los petalos envian valores NEGATIVOS por el OSC /update.
+      -- Todo lo que hay abajo (tamano, brillo, estelas) es magnitud pura, asi que
+      -- se normaliza una sola vez aqui en vez de repetir math.abs en cada consumidor.
+      -- grid_nav.lua ya hace math.abs por su cuenta en sus dos usos de sources_val.
+      local val = math.abs(G.sources_val[i] or 0)
       local chaos = params:get("p"..i.."chaos") or 0
       local shape_idx = params:get("p"..i.."shape") or 1
       local range_idx = params:get("p"..i.."range") or 1

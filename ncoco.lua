@@ -1,4 +1,31 @@
--- ncoco.lua v3.03
+-- ncoco.lua v3.04
+-- CHANGELOG v3.04 (POLARIDAD BIPOLAR + TRACK & HOLD, ambos opt-in):
+-- 1. NEW: Petal Polarity (Abs | Bipolar), global para los 6 petalos. Abs mantiene
+--    la rampa rectificada 0..1 de siempre. Bipolar la re-centra a [-0.5,+0.5], con
+--    lo que el acoplamiento del anillo pasa a ser CON SIGNO (bidireccional) y el
+--    "cero" deja de ser un pulso para ser una envolvente 50/50.
+-- 2. NEW: Petal S&H/T&H (S&H | T&H), global. T&H sigue la fuente durante la
+--    primera mitad del ciclo del petal y mantiene el ultimo valor en la segunda
+--    (reloj 50/50 exacto). El par (valor, reloj) es el mismo que ya usaba el
+--    Latch, asi que las dos salidas comparten reloj y no hay desincronizacion.
+-- 3. COMPATIBILIDAD: los dos defaults son 0 y las ramas 0 son la MISMA senal que
+--    en v3.03, no una aproximacion. Con los defaults, la salida es bit-identica.
+-- 4. PRESUPUESTO (por que no se han creado vars nuevas): el motor esta al 72% de
+--    MAX_CONTROL por los 24 NamedControl de la matriz. Reutilizar p1..p6 y c1..c6
+--    en vez de crear r1..r6 y cT1..cT6 cuesta +0 vars, +0 canales LocalIn/LocalOut
+--    (10/10 siguen cuadrados) y +0 paquetes OSC. Lo unico que crece son +24 ugens
+--    (6 Select + 6 Select + 6 Gate + 6 Lag, todos de una sola muestra), porque
+--    Select no cortocircuita y evalua las dos ramas siempre.
+-- 5. FAIL-SAFE: solo el 1 exacto de la opcion activa el modo nuevo. Cualquier otro
+--    valor cae a la rama 0, de modo que un PSET corrupto no deja el motor en un
+--    modo que el usuario no pidio.
+-- 6. DIBUJO: en bipolar los petalos envian NEGATIVOS por el OSC /update de 30 Hz.
+--    quantussy.lua normaliza con math.abs en su unica lectura de sources_val;
+--    grid_nav.lua ya se protegia con math.abs en sus dos usos, y ui.lua clampa.
+-- 7. TEST: tools/verify_p29_petals.lua (34 comprobaciones, incluidas tres pruebas
+--    de mutacion: quitar el math.abs, cambiar un default, y mandar el indice
+--    como float en vez de entero).
+-- 8. VERSION: todo el proyecto pasa a 3.04.
 -- CHANGELOG v3.03 (FALSA ALARMA DEL LATIDO + PARPADEO DEL GRID):
 -- 1. FIX: v3.02 disparaba "GRID RECOVERY (sin redraw)" sobre una rejilla SANA.
 --    Visto en maiden: "sin redraw desde hace 4.7s -> recuperando" y luego otra
@@ -123,7 +150,7 @@ engine.name = 'Ncoco'
 -- [v3.01] Version centralizada. Antes cada archivo llevaba su "vN.NN" y el
 -- banner del script se quedo en v2.14 durante toda la v3.00: no habia una
 -- unica fuente de verdad. Esto es lo que se muestra al arrancar.
-local NCOCO_VERSION = "3.03"
+local NCOCO_VERSION = "3.04"
 
 local function safe_include(name)
   local ok, result = pcall(include, name)

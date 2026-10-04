@@ -1,4 +1,4 @@
--- lib/grid_nav.lua v3.03
+-- lib/grid_nav.lua v3.04
 -- v3.03 (LATIDO deja de dar falsas alarmas):
 -- 0. NEW: GridNav.heartbeat_step() — la decision del latido, sacada a una
 --    funcion PURA para poder testearla sin simular clock ni metro.

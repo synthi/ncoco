@@ -1,4 +1,4 @@
--- lib/param_set.lua v3.03
+-- lib/param_set.lua v3.04
 -- FIX v3.00:
 -- 1. B7: the 4th Bits option "μ-law" -> "u-law". The norns builtin 6x13 font has
 --    NO glyph for U+03BC (GREEK SMALL LETTER MU) — only ASCII 32..126. The
@@ -61,6 +61,18 @@ function Params.init(SC, G, _16n)
   -- 16n Fader Orientation (Normal/Inverted)
   params:add_option("16n_orient", "16n Orientation", {"Normal", "Inverted"}, 1)
   params:set_action("16n_orient", function(x) _16n.set_inverted(x == 2) end)
+
+  -- [v3.04] Polaridad de los 6 petalos (global). Abs = comportamiento de v3.03
+  -- (rampa rectificada). Bipolar = rampa con signo, el acoplamiento del anillo pasa
+  -- a ser bidireccional y el "cero" es una envolvente 50/50 en vez de un pulso.
+  params:add_option("petal_polarity", "Petal Polarity", {"Abs", "Bipolar"}, 1)
+  params:set_action("petal_polarity", function(x) SC.set_petal_polarity(x-1) end)
+
+  -- [v3.04] Salida S&H de los 6 petalos (global). S&H = Sample & Hold (v3.03).
+  -- T&H = Track & Hold: sigue la fuente durante la primera mitad del ciclo y
+  -- mantiene el ultimo valor en la segunda (reloj 50/50).
+  params:add_option("petal_gate_mode", "Petal S&H/T&H", {"S&H", "T&H"}, 1)
+  params:set_action("petal_gate_mode", function(x) SC.set_petal_gate(x-1) end)
 
   params:add_group("TAPE OPS", 7)
   params:add_option("tape_target", "Target", {"Left", "Right", "Both"}, 3)

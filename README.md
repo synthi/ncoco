@@ -1,7 +1,7 @@
 # ncoco
 A cocoquantus inspired instrument for Norns + grid
 
-**Versión: 3.03** — desde v3.01 todos los archivos comparten el mismo número de
+**Versión: 3.04** — desde v3.01 todos los archivos comparten el mismo número de
 versión. `NCOCO_VERSION` en `ncoco.lua` es la fuente autoritativa.
 
 ## Documentación
@@ -29,6 +29,7 @@ lua tools/verify_p26_snap_taps.lua    # toques seguidos no borran snapshots
 lua tools/verify_p27_keys.lua         # K2/K3 por pantalla (rec COCO 1 / 2)
 lua tools/verify_p13_order.lua        # orden de los destinos
 lua tools/verify_p13_speed.lua        # rango de velocidad
+lua tools/verify_p29_petals.lua       # bipolar + T&H: defaults, presupuesto y dibujo
 
 # Interfaz
 lua tools/verify_p14_inspector.lua    # dibujo del inspector de destinos
