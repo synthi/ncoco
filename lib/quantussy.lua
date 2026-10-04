@@ -1,4 +1,8 @@
--- lib/quantussy.lua v3.04
+-- lib/quantussy.lua v3.05
+-- v3.05: SOLO la etiqueta de version. El codigo NO se toco: los hexagonos se
+--   dimensionan por magnitud (math.abs), que es correcto con bipolar porque un
+--   tamano negativo no existe. El centrado en el cero es cosa del scope del
+--   inspector, que vive en ui.lua (draw_scope), no aqui.
 -- CLEANUP v3.00 FASE 1:
 -- 1. FIX (B8): a missing petal coordinate used to `return` out of the whole
 --    draw loop, killing the other 5 petals. It now skips only that petal.

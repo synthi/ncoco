@@ -1,4 +1,6 @@
--- lib/sc_utils.lua v3.04
+-- lib/sc_utils.lua v3.05
+-- v3.05: SOLO la etiqueta de version. El codigo de este archivo NO se toco
+--   (los cambios de v3.05 estan en Engine_Ncoco.sc, param_set.lua y ui.lua).
 -- CHANGELOG v2.01:
 -- 1. META: Version bump to 2.01 (project-wide alignment).
 -- CHANGELOG v9004:

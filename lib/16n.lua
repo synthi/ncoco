@@ -1,4 +1,6 @@
--- lib/16n.lua v3.04
+-- lib/16n.lua v3.05
+-- v3.05: SOLO la etiqueta de version. El codigo de este archivo NO se toco
+--   (los cambios de v3.05 estan en Engine_Ncoco.sc, param_set.lua y ui.lua).
 -- NOTA v3.01: SOLO se actualizó la etiqueta de versión (unificación del
 --   proyecto). El CÓDIGO de este archivo NO se tocó: sigue fuera de alcance
 --   sin prueba en hardware. Ver docs/BIT_MODES_FINDINGS.md §6.

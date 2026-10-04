@@ -1,4 +1,17 @@
--- lib/param_set.lua v3.04
+-- lib/param_set.lua v3.05
+-- CHANGELOG v3.05 (GLOBALS declaraba 7 y contiene 9):
+-- 1. FIX: los dos params estrenados en v3.04 ("Petal Polarity" y "Petal
+--    S&H/T&H") quedaban FUERA del grupo GLOBALS y aparecian sueltos al final
+--    del menu de norns. No habia ningun error: el param funciona igual, solo
+--    salia en el sitio equivocado.
+-- 2. CAUSA: el segundo argumento de params:add_group(nombre, N) es el NUMERO
+--    de params que van dentro, NO un indice. Al anadir params hay que subirlo.
+-- 3. TERCERA VEZ que pasa en este proyecto: v2.14 (16n_orient), v3.00
+--    ("Volume 2" dentro de COCO) y ahora. Los dos primeros se parchearon a
+--    mano; ahora hay un guard generico para los CUATRO grupos en
+--    tools/verify_p30_groups.lua, que cuenta los params entre add_group.
+-- 4. Sin efecto en presets: el conteo es solo presentacion del menu. Ningun
+--    param cambia de id ni de indice, asi que los PSET siguen valiendo.
 -- FIX v3.00:
 -- 1. B7: the 4th Bits option "μ-law" -> "u-law". The norns builtin 6x13 font has
 --    NO glyph for U+03BC (GREEK SMALL LETTER MU) — only ASCII 32..126. The
@@ -34,7 +47,11 @@ local Params = {}
 function Params.init(SC, G, _16n)
   params:add_separator("Ncoco")
   
-  params:add_group("GLOBALS", 7)
+  -- [v3.05] 9, no 7. GLOBALS contiene: Master Vol, Monitor Level, Global Chaos,
+  -- Tape Drift, Bleed Routing, DJ Filter Type, 16n Orientation, Petal Polarity
+  -- y Petal S&H/T&H. Con 7, los dos ultimos se salian del grupo. Lo vigila
+  -- tools/verify_p30_groups.lua: si anades un param aqui, sube el numero.
+  params:add_group("GLOBALS", 9)
   params:add_control("global_vol", "Master Vol", controlspec.new(0, 2, "lin", 0, 1))
   params:set_action("global_vol", function(x) params:set("vol_l", x); params:set("vol_r", x) end)
   

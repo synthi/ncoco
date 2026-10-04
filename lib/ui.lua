@@ -1,4 +1,26 @@
--- lib/ui.lua v3.04
+-- lib/ui.lua v3.05
+-- CHANGELOG v3.05 (EL SCOPE DE LOS PETALOS SE CENTRA EN BIPOLAR):
+-- 1. draw_scope acepta un 8o argumento OPCIONAL (bipolar). Si no se le pasa,
+--    lo deduce solo: fuentes 1..6 (los petalos) con el param global
+--    petal_polarity en Bipolar. Asi no hay que tocar NINGUNA de las llamadas,
+--    y el menu de patch (que dibuja la fuente que estas cableando) queda
+--    coherente con el petalo que muestra.
+-- 2. Con bipolar el cero pasa al CENTRO de la caja y la onda recorre -1..+1;
+--    ademas se dibuja la linea de cero en puntos al nivel mas tenue. Es el
+--    mismo criterio que ya usaba el inspector de destinos (cero centrado,
+--    recorte -1..+1, linea al nivel 2 con fill() para no engordar el trazo),
+--    para que las dos pantallas se lean igual.
+-- 3. MOTIVO: el OSC /update manda los petalos CON SIGNO cuando el bipolar esta
+--    activo, y esto recortaba a 0..1. Todo valor negativo se pintaba pegado al
+--    borde inferior: media onda no existia y -0.4 daba EXACTAMENTE la misma
+--    pantalla que 0. El petalo parecia clavado en su minimo justo cuando mas
+--    se movia.
+-- 4. SIN EFECTOS COLATERALES: con bipolar=false esta funcion emite
+--    exactamente las mismas llamadas de dibujo que antes (zero_y=y+h,
+--    half_h=h, lo=0 reproducen py = y + h - val*h), asi que los inspectores de
+--    env, yellow y coco no cambian ni un pixel. Verificado en
+--    tools/verify_p29_petals.lua comparando el inspector de env con las dos
+--    polaridades.
 -- CHANGELOG v3.01:
 -- 1. FIX: draw_main leia G.sources_val[7] y [8] SIN el `or 0` que usa el resto
 --    del archivo. Un nil tumbaba el redraw de pantalla entero.
@@ -68,18 +90,56 @@ function UI.update_histories(G)
   G.scope_head = (G.scope_head % G.SCOPE_LEN) + 1
 end
 
-function UI.draw_scope(G, id, x, y, w, h, scale)
+function UI.draw_scope(G, id, x, y, w, h, scale, bipolar)
   local hist = G.scope_history[id]
   local head = G.scope_head
   local len = G.SCOPE_LEN
+
+  -- [v3.05] Modo bipolar para los 6 petalos. Se decide por el id de la fuente
+  -- (1..6 son petalos) y el param GLOBAL petal_polarity, asi que no hay que
+  -- tocar ninguna de las llamadas: los otros inspectores (env 7-8, yellow 9-10,
+  -- coco 11-12) no entran nunca aqui porque su id es > 6, y el menu de patch
+  -- (que dibuja la fuente que estas cableando) queda coherente con el petalo
+  -- que muestra. El 8o argumento permite forzarlo desde fuera.
+  --
+  -- POR QUE HACE FALTA: el OSC /update manda los petalos CON SIGNO cuando el
+  -- modo bipolar esta activo. Antes de v3.05 esta funcion recortaba a 0..1, de
+  -- modo que todo valor negativo se dibujaba pegado al borde inferior: media
+  -- onda desaparecia y el petalo parecia clavado en su minimo. El rango del
+  -- bipolar es -1..+1 con el cero en el centro, que es exactamente el criterio
+  -- que ya usa el inspector de destinos.
+  --
+  -- INVARIANTE: con bipolar=false esta funcion emite EXACTAMENTE las mismas
+  -- llamadas de dibujo que antes de v3.05 (zero_y = y+h, half_h = h, lo = 0
+  -- reproducen py = y + h - val*h), asi que las pantallas no bipolares no
+  -- cambian ni un pixel.
+  if bipolar == nil then
+    bipolar = (id <= 6) and ((params:get("petal_polarity") or 1) == 2)
+  end
+
+  local zero_y, half_h, lo
+  if bipolar then
+    zero_y, half_h, lo = y + h / 2, h / 2, -1
+    -- Linea de cero discontinua, al nivel mas tenue. El fill() es obligatorio:
+    -- si no, estos puntos se acumulan en el trazo de la onda y salen mas
+    -- gruesos, porque se dibujan por su borde (la misma trampa que se arreglo
+    -- en v3.00 Fase 3 en el inspector de destinos, donde el umbral se veia
+    -- "engordado").
+    screen.level(2)
+    for tx = x + 1, x + w - 1, 4 do screen.pixel(tx, zero_y) end
+    screen.fill()
+  else
+    zero_y, half_h, lo = y + h, h, 0
+  end
+
   screen.level(15)
   local last_px, last_py = nil, nil
   for i=0, w-1 do
     if i < len then
       local idx = (head - 1 - i - 1) % len + 1
-      local val = util.clamp(hist[idx] * (scale or 1), 0, 1)
+      local val = util.clamp(hist[idx] * (scale or 1), lo, 1)
       local px = x + w - i
-      local py = y + h - (val * h) 
+      local py = zero_y - (val * half_h) 
       if last_px then screen.move(last_px, last_py); screen.line(px, py) else screen.pixel(px, py) end
       last_px = px; last_py = py
     end

@@ -1,4 +1,6 @@
--- lib/globals.lua v3.04
+-- lib/globals.lua v3.05
+-- v3.05: SOLO la etiqueta de version. El codigo de este archivo NO se toco
+--   (los cambios de v3.05 estan en Engine_Ncoco.sc, param_set.lua y ui.lua).
 -- CHANGELOG v3.01:
 -- 1. NEW: M.last_osc_time — marca del ultimo /update recibido de SC. La usa
 --    el detector de OSC parado en ncoco.lua. NO actua: solo registra.

@@ -1,4 +1,39 @@
--- ncoco.lua v3.04
+-- ncoco.lua v3.05
+-- CHANGELOG v3.05 (BIPOLAR CENTRADO + GLOBALS COMPLETO):
+-- 1. FIX: el bipolar NO estaba centrado. Se re-centraba con pN-0.5, o sea un
+--    rango +-0.5, mientras que Abs llega a 1.0. Como la matriz aplica .tanh
+--    (fb_petals), el pico util era tanh(0.5)=0.46, el 61% del pico de Abs
+--    (tanh(1)=0.76): la bipolaridad se oia mas floja que el modo Abs en vez de
+--    recorrer lo mismo en las dos direcciones. Ahora es 2*pN-1, con el CERO en
+--    el centro exacto de la rampa (p=0.5 -> 0) y el pico de vuelta en 0.76.
+-- 2. FIX: GLOBALS declaraba 7 y contiene 9. "Petal Polarity" y "Petal S&H/T&H"
+--    (los dos params que estreno v3.04) se caian del grupo y aparecian sueltos
+--    al final del menu de norns. TERCERA vez que pasa en el proyecto (v2.14 con
+--    16n_orient, v3.00 con "Volume 2" dentro de COCO): el segundo argumento de
+--    params:add_group es el NUMERO de params, no un indice. Ahora hay un guard
+--    generico para los CUATRO grupos: tools/verify_p30_groups.lua.
+-- 3. FIX (UI): el scope del inspector de petalos recortaba a 0..1, asi que en
+--    bipolar todo valor negativo se dibujaba pegado al borde inferior: media
+--    onda no existia y -0.4 daba EXACTAMENTE la misma pantalla que 0. Ahora la
+--    onda se centra y lleva linea de cero, el mismo criterio que ya usaba el
+--    inspector de destinos. En Abs no cambia ni un pixel (mismos numeros de
+--    dibujo: zero_y=y+h, half_h=h, lo=0 reproducen py = y + h - val*h).
+-- 4. SIN CAMBIOS DE COMPORTAMIENTO EN LOS DEFAULTS: el pico de Abs es el mismo
+--    de siempre y el bipolar sigue siendo opt-in. Ningun param cambia de id ni
+--    de indice, asi que los PSET existentes siguen valiendo.
+-- 5. TEST: tools/verify_p30_groups.lua (nuevo: los 4 grupos de params) y
+--    tools/verify_p29_petals.lua ampliado a 53 comprobaciones. Incluye una que
+--    exige que el bipolar recorra LO MISMO que Abs (pico tanh(1) en los dos),
+--    otra que comprueba que -0.4 y 0 ya no dan la misma pantalla, y otra que
+--    compara el inspector de env con las dos polaridades para demostrar que
+--    compartir draw_scope no lo contagia.
+-- 6. AVISO PARA EL QUE VENGA: verify_p29_petals.lua afirmaba que el segundo
+--    argumento de params:add_group era un INDICE y no un contador, y exigia
+--    que el 7 siguiera en su sitio. Era un test que FIJABA el bug: corregir el
+--    contador hacia que el test fallara. Ya esta reescrito como comprobacion de
+--    posicion (los params, dentro del grupo). Si un test te impide arreglar
+--    algo, sospecha primero del test.
+-- 7. VERSION: todo el proyecto pasa a 3.05.
 -- CHANGELOG v3.04 (POLARIDAD BIPOLAR + TRACK & HOLD, ambos opt-in):
 -- 1. NEW: Petal Polarity (Abs | Bipolar), global para los 6 petalos. Abs mantiene
 --    la rampa rectificada 0..1 de siempre. Bipolar la re-centra a [-0.5,+0.5], con
@@ -150,7 +185,7 @@ engine.name = 'Ncoco'
 -- [v3.01] Version centralizada. Antes cada archivo llevaba su "vN.NN" y el
 -- banner del script se quedo en v2.14 durante toda la v3.00: no habia una
 -- unica fuente de verdad. Esto es lo que se muestra al arrancar.
-local NCOCO_VERSION = "3.04"
+local NCOCO_VERSION = "3.05"
 
 local function safe_include(name)
   local ok, result = pcall(include, name)

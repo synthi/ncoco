@@ -431,9 +431,24 @@ Si sobran huecos, se llenan con lo que venga después (en ncoco, `Volume 2` se
 colaba dentro de COCO 1). Si faltan, los últimos params caen fuera del grupo.
 Cualquiera de los dos errores **desplaza** el resto del menú.
 
+**Ha pasado tres veces en ncoco:** v2.14 (`16n_orient` se quedó fuera de
+GLOBALS), v3.00 (`Volume 2` cayó dentro de COCO 1) y v3.05 (`Petal Polarity` y
+`Petal S&H/T&H` se quedaron fuera de GLOBALS). Las tres veces el síntoma fue el
+mismo: el param **funciona** perfectamente, solo aparece en el sitio
+equivocado. No hay error, no hay aviso, y por eso se coló tres veces.
+
 **Cómo no equivocarse:** cuenta los `params:add_*` entre el `add_group` y el
 siguiente `add_group`. Ignora las líneas comentadas. Automatízalo con un test:
-`tools/verify_p22_grupo_coco.lua` lo hace y falla si no cuadra.
+`tools/verify_p30_groups.lua` lo hace para los **cuatro** grupos del archivo y,
+si no cuadra, te dice la línea y a qué número subir el contador.
+`tools/verify_p22_grupo_coco.lua` es el guard histórico del grupo COCO.
+
+**Trampa de segundo orden (aprendida en v3.05).** Un test que *fija el valor*
+—`add_group("GLOBALS", 7)`— convierte el bug en algo **imposible de arreglar**:
+al corregir el contador, falla el test, y el siguiente que llega se cree el
+test. Comprueba la **propiedad** («los params están dentro del grupo»), nunca el
+literal. Regla general: si un test te impide arreglar algo, sospecha primero
+del test.
 
 ### 5.3 `default()` no es cargar el PSET
 

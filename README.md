@@ -1,7 +1,7 @@
 # ncoco
 A cocoquantus inspired instrument for Norns + grid
 
-**Versión: 3.04** — desde v3.01 todos los archivos comparten el mismo número de
+**Versión: 3.05** — desde v3.01 todos los archivos comparten el mismo número de
 versión. `NCOCO_VERSION` en `ncoco.lua` es la fuente autoritativa.
 
 ## Documentación
@@ -17,6 +17,7 @@ Se ejecutan con `lua` pelado, sin norns: cada uno monta su propio stub.
 ```sh
 # Documento / estructura
 lua tools/verify_v302_unified.lua     # versiones unificadas + cleanup() segura
+lua tools/verify_p30_groups.lua       # los 4 grupos declaran los params que tienen
 lua tools/verify_p22_grupo_coco.lua   # el grupo COCO declara 17 params
 lua tools/verify_p8_matrix.lua        # la matriz hace 288 llamadas OSC
 

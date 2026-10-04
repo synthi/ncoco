@@ -93,6 +93,13 @@ function util.trim_string_to_width(s) return s end
 -- norns usa Lua 5.3, donde math.pow todavia existe (deprecado).
 -- Este banco corre con Lua 5.5, que ya lo elimino, asi que se reimplementa
 -- para poder ejecutar el codigo real. No afecta a la maquina.
+--
+-- OJO: math.tanh y math.sinh/cosh suelen faltar tambien (dependen de como se
+-- compilo Lua). Si un test necesita tanh, que la defina a mano:
+--   local function tanh(x) local e = math.exp(2*x); return (e-1)/(e+1) end
+-- No se reimplementan aqui a proposito: un test que use math.tanh directo
+-- funcionaria en este banco y fallaria en la maquina, que es justo lo que el
+-- banco existe para evitar.
 --------------------------------------------------------------------
 if not math.pow then math.pow = function(a, b) return a ^ b end end
 

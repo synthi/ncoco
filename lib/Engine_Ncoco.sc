@@ -1,4 +1,18 @@
-// Engine_Ncoco.sc v3.04
+// Engine_Ncoco.sc v3.05
+// v3.05 POLARIDAD BIPOLAR CENTRADA (mismo numero de vars y de ugens):
+// 1. FIX: el re-centrado bipolar era pN-0.5, que deja el rango en +-0.5 cuando
+//    Abs llega a 1.0. Como la matriz aplica .tanh (fb_petals), en Abs el pico
+//    era tanh(1)=0.76 y en bipolar se quedaba en tanh(0.5)=0.46, el 61% del
+//    recorrido: el bipolar "se oia flojo" frente a Abs en vez de recorrer lo
+//    mismo en las dos direcciones.
+// 2. Ahora es 2*pN-1. El CERO cae en el centro exacto de la rampa rectificada
+//    (p=0.5 -> 0) y el pico vuelve a tanh(1)=0.76, identico al de Abs.
+// 3. SIGUE SIENDO +0 VARS: solo cambia la expresion de la rama 1 del Select.
+//    Con pBipolar=0 (default) la senal es bit-identica a v3.03/v3.04, porque
+//    la rama 0 no se ha tocado.
+// 4. TEST: tools/verify_p29_petals.lua fija los numeros exactos (tanh(1) en
+//    los dos modos, cero en el centro) y exige que la forma vieja pN-0.5 no
+//    quede en ninguna de las 6 ramas.
 // v3.04 PETAL SHAPE - dos modos opt-in, comportamiento por defecto IDENTICO:
 // 1. pBipolar (0=Abs, por defecto | 1=Bipolar). Tras la rampa rectificada (.abs)
 //    se re-centra a [-0.5,+0.5] con Select.kr, de modo que el acoplamiento del
@@ -259,17 +273,24 @@ Engine_Ncoco : CroneEngine {
 			b_ph1 = Phasor.ar(0, (p1f + mod_p1).abs * SampleDur.ir, 0, 1); t1 = Trig1.ar(b_ph1 > 0.05, SampleDur.ir); 
 			// [v3.04] Polaridad. La rampa rectificada se calcula igual que en v3.03 y
 			// despues se RE-CENTRA reutilizando la misma variable: pBipolar=0 devuelve
-			// la propia pN (abs, 0..1); pBipolar=1 devuelve pN-0.5 (con signo, +-0.5).
+			// la propia pN (abs, 0..1); pBipolar=1 devuelve 2*pN-1 (con signo, -1..+1).
+			// [v3.05] POR QUE 2p-1 Y NO p-0.5: p-0.5 dejaba el rango en +-0.5, pero
+			// Abs llega a 1.0. Como la matriz aplica .tanh (fb_petals), en Abs el
+			// pico era tanh(1)=0.76 y con p-0.5 se quedaba en tanh(0.5)=0.46, el
+			// 61% del pico de Abs (un 39% menos de recorrido), y la bipolaridad
+			// "se oia floja". 2p-1 devuelve el pico a tanh(1)=0.76 (el 100%) y
+			// pone el CERO exactamente en el centro (p=0.5 -> 0), que es lo que
+			// se espera de un bipolar.
 			// Reutilizar pN en vez de crear rN..rN cuesta 0 vars, que es justo el
 			// presupuesto que ya se toco una vez (ver nota v3.04 en la cabecera).
 			// Beneficio: p1 con signo alimenta directamente el acoplamiento de p2, asi
 			// que la bipolaridad se propaga sola por todo el anillo.
-			p1 = ((b_ph1 + (fb_petals[5] * p1c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p1 = Select.ar(pBipolar, [p1, p1 - 0.5]);
-			b_ph2 = Phasor.ar(0, (p2f + mod_p2).abs * SampleDur.ir, 0, 1); t2 = Trig1.ar(b_ph2 > 0.05, SampleDur.ir); p2 = ((b_ph2 + (p1 * p2c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p2 = Select.ar(pBipolar, [p2, p2 - 0.5]);
-			b_ph3 = Phasor.ar(0, (p3f + mod_p3).abs * SampleDur.ir, 0, 1); t3 = Trig1.ar(b_ph3 > 0.05, SampleDur.ir); p3 = ((b_ph3 + (p2 * p3c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p3 = Select.ar(pBipolar, [p3, p3 - 0.5]);
-			b_ph4 = Phasor.ar(0, (p4f + mod_p4).abs * SampleDur.ir, 0, 1); t4 = Trig1.ar(b_ph4 > 0.05, SampleDur.ir); p4 = ((b_ph4 + (p3 * p4c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p4 = Select.ar(pBipolar, [p4, p4 - 0.5]);
-			b_ph5 = Phasor.ar(0, (p5f + mod_p5).abs * SampleDur.ir, 0, 1); t5 = Trig1.ar(b_ph5 > 0.05, SampleDur.ir); p5 = ((b_ph5 + (p4 * p5c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p5 = Select.ar(pBipolar, [p5, p5 - 0.5]);
-			b_ph6 = Phasor.ar(0, (p6f + mod_p6).abs * SampleDur.ir, 0, 1); t6 = Trig1.ar(b_ph6 > 0.05, SampleDur.ir); p6 = ((b_ph6 + (p5 * p6c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p6 = Select.ar(pBipolar, [p6, p6 - 0.5]);
+			p1 = ((b_ph1 + (fb_petals[5] * p1c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p1 = Select.ar(pBipolar, [p1, p1 * 2 - 1]);
+			b_ph2 = Phasor.ar(0, (p2f + mod_p2).abs * SampleDur.ir, 0, 1); t2 = Trig1.ar(b_ph2 > 0.05, SampleDur.ir); p2 = ((b_ph2 + (p1 * p2c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p2 = Select.ar(pBipolar, [p2, p2 * 2 - 1]);
+			b_ph3 = Phasor.ar(0, (p3f + mod_p3).abs * SampleDur.ir, 0, 1); t3 = Trig1.ar(b_ph3 > 0.05, SampleDur.ir); p3 = ((b_ph3 + (p2 * p3c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p3 = Select.ar(pBipolar, [p3, p3 * 2 - 1]);
+			b_ph4 = Phasor.ar(0, (p4f + mod_p4).abs * SampleDur.ir, 0, 1); t4 = Trig1.ar(b_ph4 > 0.05, SampleDur.ir); p4 = ((b_ph4 + (p3 * p4c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p4 = Select.ar(pBipolar, [p4, p4 * 2 - 1]);
+			b_ph5 = Phasor.ar(0, (p5f + mod_p5).abs * SampleDur.ir, 0, 1); t5 = Trig1.ar(b_ph5 > 0.05, SampleDur.ir); p5 = ((b_ph5 + (p4 * p5c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p5 = Select.ar(pBipolar, [p5, p5 * 2 - 1]);
+			b_ph6 = Phasor.ar(0, (p6f + mod_p6).abs * SampleDur.ir, 0, 1); t6 = Trig1.ar(b_ph6 > 0.05, SampleDur.ir); p6 = ((b_ph6 + (p5 * p6c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs; p6 = Select.ar(pBipolar, [p6, p6 * 2 - 1]);
 			
 			// [v3.04] pGate: 0 = Sample & Hold (exactamente v3.03), 1 = Track & Hold.
 			// T&H sigue pN mientras b_phN este por encima de 0.5 y congela el ultimo
