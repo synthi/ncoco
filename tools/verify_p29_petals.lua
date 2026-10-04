@@ -85,7 +85,16 @@ check('LocalIn sigue en 10 canales', sc:match('LocalIn%.ar%(10%)') ~= nil)
 local lo = sc:match('LocalOut%.ar%(%[([^%]]*)%]%)')
 eq('LocalOut = 10, cuadrados con LocalIn',
    lo and (select(2, lo:gsub('[^,]+', ''))) or -1, 10)
-eq('ugens = 234 (baseline 210, +24)', count(sc, '%w+%.ar%(') + count(sc, '%w+%.kr%('), 234)
+-- OJO: este contador es un APROXIMADO, por dos razones a la vez. (a) Solo ve
+-- llamadas con la forma Algo.ar( / Algo.kr(: los 6 tanh de la etapa B (v3.06)
+-- son UGENS REALES, pero este patron no los ve. (b) Cuenta tambien los
+-- COMENTARIOS, porque el motor se documenta a si mismo con frases largas: si
+-- al escribir la prosa pones algo con la forma "Algo.ar(", este numero se
+-- mueve sin que cambie ni una linea de codigo. Por eso el numero de v3.06 es
+-- 236 (los 2 K2A nuevos) y el COSTE REAL es +8 ugens (6 tanh + 2 K2A).
+eq('ugens (aprox. del patron) = 236 (baseline v3.03 210, +26)', count(sc, '%w+%.ar%(') + count(sc, '%w+%.kr%('), 236)
+check('la etapa B tiene los 6 tanh que el patron NO ve (coste real +8 ugens)',
+      count(sc, 'out%d%.tanh') == 6, 'tanh en la etapa B: ' .. count(sc, 'out%d%.tanh'))
 
 --------------------------------------------------------------------
 section('MENU: los defaults son Abs y S&H')
@@ -399,5 +408,70 @@ check('addCommand("p_bipolar", "i", ...)', sc:match('addCommand%("p_bipolar", "i
 check('addCommand("p_gate", "i", ...)', sc:match('addCommand%("p_gate", "i",') ~= nil)
 check('ninguno se manda como "f" (indice de Select vulnerable)',
       sc:match('addCommand%("p_[gb][a-z]*, "f",') == nil)
+
+--------------------------------------------------------------------
+section('MOTOR: Shape tiene que LLEGAR A LA MATRIZ (v3.06)')
+--------------------------------------------------------------------
+-- ESTE ERA EL BUG GRANDE, y es el que obliga a estas comprobaciones.
+--
+-- Desde 7737aaa (v2.52) la matriz leia SIEMPRE la rama cruda del petal, la que
+-- escribe LocalOut. Shape (Tri | Castle) solo afectaba al OSC /update: con
+-- Castle el display dibujaba escalones y el sonido seguia siendo el
+-- triangulo. El parametro llevaba anos siendo decorativo sin que nadie lo
+-- notara, porque con Tri (el default) outN == pN y las dos ramas coinciden.
+--
+-- La idea del diseno original (b13f4da) es que Shape es un filtro de SALIDA,
+-- no parte del oscilador: el anillo genera, y outN decide QUE se manda hacia
+-- fuera. Por eso hay DOS etapas de sources_sig y no una:
+--
+--   etapa A (fb_petals, cruda, retrasada) -> la frecuencia de los petalos
+--   etapa B (outN, con shape, del bloque)   -> los destinos de audio
+--
+-- Y por eso el ORDEN importa tanto como el contenido: si mod_pN leyera la etapa
+-- B habria un lazo algebraico petal -> sources_sig -> mod_pN -> petal sin
+-- retardo, y SuperCollider no lo puede construir. Por eso estas comprobaciones
+-- miran POSICIONES y no solo que el patron exista en algun sitio del fichero.
+local NL2 = string.char(10)
+
+local function sc_linea(pat)
+  local n = 0
+  for line in sc:gmatch('[^' .. NL2 .. ']+') do
+    n = n + 1
+    if line:match(pat) then return n end
+  end
+  return nil
+end
+
+local l_etapaA = sc_linea('sources_sig = %[fb_petals%[0%]')
+local l_etapaB = sc_linea('sources_sig = %[out1%.tanh')
+local l_out6   = sc_linea('out6=Select%.ar%(p6shape')
+local l_modp6  = sc_linea('mod_p6=')
+local l_vel    = sc_linea('mod_val_speedL=')
+
+check('control negativo: se localizan las dos etapas, out6 y el primer destino',
+      (l_etapaA ~= nil) and (l_etapaB ~= nil) and (l_out6 ~= nil) and
+      (l_modp6 ~= nil) and (l_vel ~= nil))
+check('hay EXACTAMENTE dos etapas de sources_sig (0 vars nuevas: se reutiliza)',
+      count(sc, 'sources_sig = %[') == 2, 'etapas: ' .. count(sc, 'sources_sig = %['))
+check('la etapa B se calcula DESPUES de out6 (si no, outN no existe todavia)',
+      l_etapaB > l_out6,
+      string.format('out6=%s  etapaB=%s', tostring(l_out6), tostring(l_etapaB)))
+check('la etapa B se calcula ANTES del primer destino (mod_val_speedL)',
+      l_etapaB < l_vel,
+      string.format('etapaB=%s  mod_val_speedL=%s', tostring(l_etapaB), tostring(l_vel)))
+check('las 6 mod_pN se resuelven con la etapa A, ANTES de la etapa B '
+   .. '(si no: lazo algebraico sin retardo y no compila)',
+      l_modp6 < l_etapaB,
+      string.format('mod_p6=%s  etapaB=%s', tostring(l_modp6), tostring(l_etapaB)))
+check('LocalOut sigue escribiendo la rama CRUDA (el anillo no se toca)',
+      sc:match('LocalOut%.ar%(%[p1, p2') ~= nil)
+check('el acoplamiento del anillo sigue con la rama cruda (fb_petals[5])',
+      sc:match('fb_petals%[5%] %* p1c%.pow') ~= nil)
+-- El invariante de fondo, escrito como comprobacion: la senal que se DIBUJA y
+-- la senal que se MODULA tienen que ser la MISMA variable. Por eso outN es lo
+-- unico que sale por el OSC y lo unico que hay en la etapa B.
+check('display y matriz leen la MISMA variable: 6 outN por el OSC y 6 en la etapa B',
+      count(sc, 'A2K%.kr%(out%d') == 6 and count(sc, 'out%d%.tanh') == 6,
+      string.format('OSC=%d  etapaB=%d', count(sc, 'A2K%.kr%(out%d'), count(sc, 'out%d%.tanh')))
 
 H.done()

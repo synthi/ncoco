@@ -1,4 +1,35 @@
--- ncoco.lua v3.05
+-- ncoco.lua v3.06
+-- CHANGELOG v3.06 (SHAPE POR FIN MODULA, una regresion desde v2.52):
+-- 1. FIX: la matriz leia siempre la rama CRUDA del petal, asi que Shape
+--    (Tri | Castle) solo cambiaba lo que se dibujaba en el OSC /update. Con
+--    Castle el display mostraba escalones y el sonido seguia siendo el
+--    triangulo: el parametro era decorativo. La RUTA que suena y la que se ve
+--    eran dos senales distintas desde el commit 7737aaa (v2.52), que colapso
+--    las dos etapas de sources_sig en una.
+-- 2. SE RESTAURA EL DISENO ORIGINAL (b13f4da): dos etapas. La cruda alimenta la
+--    frecuencia de los petalos; la de outN (con el shape aplicado) alimenta
+--    TODOS los destinos de audio: velocidad, amplitud, feedback, filtro, flip,
+--    skip, rec, volumen y entrada de audio. Shape es un filtro de SALIDA, no
+--    parte del oscilador: el anillo genera, outN decide que se manda fuera.
+-- 3. POR QUE NO SE TOCA LA FRECUENCIA DE LOS PETALOS: mod_pN se resuelve antes
+--    de la etapa B. Si usara outN (valor del bloque actual) habria un lazo
+--    algebraico petal -> sources_sig -> mod_pN -> petal sin retardo, y SC no
+--    puede construir eso. El retardo de fb_petals es el que rompe el lazo.
+-- 4. SE MANTIENE EL .tanh: es el mismo acondicionamiento que tenia la rama
+--    cruda, deja el pico en 0.76 y el caracter actual intacto. Sin el, la
+--    modulacion llegaria un 24% mas fuerte.
+-- 5. INAUDIBLE POR DEFECTO: con Shape=Tri (el default) outN == pN, y lo unico
+--    que cambia es el retardo de un bloque (~1.3 ms a 48 kHz). Quien no toca
+--    Shape no oye nada distinto. Quien lo pone en Castle, por fin lo oye.
+-- 6. COSTE: +8 ugens, 0 vars, 0 canales LocalIn/LocalOut (10/10), 0 paquetes
+--    OSC. Se reutiliza sources_sig en vez de crear una variable nueva, porque a
+--    partir de la etapa B su version cruda ya no hace falta.
+-- 7. TEST: tools/verify_p29_petals.lua pasa a 62 comprobaciones. Las nuevas
+--    fijan el ORDEN de las etapas (out6 -> etapa B -> primer destino, y las 6
+--    mod_pN antes de la etapa B) y el invariante de fondo: lo que se DIBUJA y lo
+--    que se MODULA tienen que ser la MISMA variable. Ese invariante es el que
+--    faltaba desde v2.52 y el que habria cazado el bug.
+-- 8. VERSION: todo el proyecto pasa a 3.06.
 -- CHANGELOG v3.05 (BIPOLAR CENTRADO + GLOBALS COMPLETO):
 -- 1. FIX: el bipolar NO estaba centrado. Se re-centraba con pN-0.5, o sea un
 --    rango +-0.5, mientras que Abs llega a 1.0. Como la matriz aplica .tanh
@@ -185,7 +216,7 @@ engine.name = 'Ncoco'
 -- [v3.01] Version centralizada. Antes cada archivo llevaba su "vN.NN" y el
 -- banner del script se quedo en v2.14 durante toda la v3.00: no habia una
 -- unica fuente de verdad. Esto es lo que se muestra al arrancar.
-local NCOCO_VERSION = "3.05"
+local NCOCO_VERSION = "3.06"
 
 local function safe_include(name)
   local ok, result = pcall(include, name)

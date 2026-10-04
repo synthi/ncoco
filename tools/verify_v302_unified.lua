@@ -16,7 +16,7 @@ local function check(name, cond, detail)
   else print("  FALLA " .. name .. (detail and ("  -- " .. detail) or "")); fails = fails + 1 end
 end
 
-local VERSION = "3.05"
+local VERSION = "3.06"
 
 local files = {
   "ncoco.lua",

@@ -1,4 +1,39 @@
-// Engine_Ncoco.sc v3.05
+// Engine_Ncoco.sc v3.06
+// v3.06 SHAPE POR FIN MODULA. Regresion desde 7737aaa (v2.52):
+// 1. QUE PASABA: la matriz leia SIEMPRE la rama cruda del petal (la que escribe
+//    LocalOut), asi que Shape (Tri | Castle) solo afectaba al OSC /update. Con
+//    Castle el display dibujaba escalones y el sonido seguia siendo el
+//    triangulo: el parametro llevaba anos siendo decorativo.
+// 2. LA PRUEBA ESTA EN DOS LINEAS DEL MISMO FICHERO: LocalOut escribe [p1..p6]
+//    y SendReply envia [out1..out6]. yellowL/yellowR SI aparecen igual en las
+//    dos, o sea que la intencion era la misma; los petalos se separaron solos.
+//    Y el historial lo confirma: en NINGUN commit LocalOut llevo la version con
+//    shape (la busqueda de esa forma sale vacia en todo el repo). La cadena se
+//    rompio en 2.52 y no se nota al releer el codigo.
+// 3. POR QUE NADIE LO NOTO: con Shape=Tri (el default) outN == pN, y las dos
+//    ramas coinciden. El bug solo aparece cuando usas la funcion, que es justo
+//    cuando el display te hacia fiar.
+// 4. SE RESTAURA EL DISENO ORIGINAL (b13f4da), que tenia DOS etapas de
+//    sources_sig: la cruda para la frecuencia de los petalos y la de outN para
+//    los destinos de audio. Shape es un filtro de SALIDA, no parte del
+//    oscilador: el anillo genera, y outN decide que se manda hacia fuera.
+// 5. LA ETAPA A NO SE TOCA, y no por capricho: mod_pN se resuelve con ella y
+//    alimenta la fase del propio petal. Si leyera outN (valor del bloque
+//    actual) habria un lazo algebraico petal -> sources_sig -> mod_pN -> petal
+//    sin retardo, y SuperCollider no puede construir eso. El retardo de un
+//    bloque de fb_petals es lo que rompe el lazo. El acoplamiento del anillo
+//    (fb_petals[5] en p1) sigue crudo por el mismo motivo.
+// 6. POR QUE .tanh: es el MISMO acondicionamiento que ya tenia la rama cruda
+//    (fb_petals = feedback_in[0..5].tanh). Mantenerlo deja el pico en 0.76 y el
+//    caracter intacto; quitarlo haria que la modulacion llegase un 24% mas
+//    fuerte. Con Tri (el default) lo unico que cambia es el retardo de un
+//    bloque (~1.3 ms): inaudible. Quien no usa Shape no oye nada distinto.
+// 7. COSTE: +8 ugens (6 tanh + 2 K2A duplicados), 0 vars, 0 canales
+//    LocalIn/LocalOut y 0 paquetes OSC. Se REUTILIZA sources_sig, que a partir
+//    de la etapa B ya no hace falta en su version cruda.
+// 8. TEST: tools/verify_p29_petals.lua fija el ORDEN (out6 -> etapa B ->
+//    mod_val_speedL, y las 6 mod_pN antes de la etapa B) y comprueba que
+//    display y matriz leen la misma variable.
 // v3.05 POLARIDAD BIPOLAR CENTRADA (mismo numero de vars y de ugens):
 // 1. FIX: el re-centrado bipolar era pN-0.5, que deja el rango en +-0.5 cuando
 //    Abs llega a 1.0. Como la matriz aplica .tanh (fb_petals), en Abs el pico
@@ -308,6 +343,40 @@ Engine_Ncoco : CroneEngine {
 			c6=Select.ar(pGate,[Latch.ar(p5,t6), Lag.ar(Gate.ar(p5,b_ph6>0.5),0.004)]);
 			out1=Select.ar(p1shape,[p1,c1]); out2=Select.ar(p2shape,[p2,c2]); out3=Select.ar(p3shape,[p3,c3]);
 			out4=Select.ar(p4shape,[p4,c4]); out5=Select.ar(p5shape,[p5,c5]); out6=Select.ar(p6shape,[p6,c6]);
+			// [v3.06] ETAPA B: LOS DESTINOS LEEN EL PETALO CON EL SHAPE APLICADO.
+			//
+			// QUE PASABA: la matriz leia siempre la rama cruda, la que escribe
+			// LocalOut, asi que Shape SOLO afectaba al OSC /update. Con "Castle"
+			// el display dibujaba escalones y el sonido seguia siendo el
+			// triangulo: el parametro era decorativo desde 7737aaa (v2.52),
+			// donde las DOS etapas de sources_sig se colapsaron en una. En el
+			// diseno original (b13f4da) habia dos: la cruda alimentaba la
+			// frecuencia de los petalos y la de outN los destinos de audio.
+			// Esta linea la restaura.
+			//
+			// POR QUE LA FRECUENCIA DE LOS PETALOS SIGUE CON LA RAMA CRUDA:
+			// mod_pN se calcula ANTES de esta linea y alimenta la fase del
+			// propio petal. Si leyera outN (valor del bloque ACTUAL) habria un
+			// lazo algebraico petal -> sources_sig -> mod_pN -> petal sin
+			// retardo, y SuperCollider no puede construir eso. El retardo de un
+			// bloque de fb_petals es justo lo que rompe el lazo, y por eso NO se
+			// toca. El acoplamiento del anillo (fb_petals[5] en p1) tambien
+			// sigue crudo: el anillo es el GENERADOR y Shape es un filtro de
+			// SALIDA, no parte del oscilador.
+			//
+			// POR QUE .tanh: es el mismo acondicionamiento que ya tenia la rama
+			// cruda (fb_petals = feedback_in[0..5].tanh). Mantenerlo deja el pico
+			// en 0.76 y el caracter actual intacto; quitarlo haria que la
+			// modulacion llegase un 24% mas fuerte. Con Shape=Tri (el default)
+			// outN == pN, asi que para quien no toca Shape lo unico que cambia es
+			// el retardo de un bloque (~1.3 ms a 48 kHz): inaudible. Quien no usa
+			// Shape no oye nada distinto, y quien lo usa por fin lo oye.
+			//
+			// COSTE: +8 ugen (6 tanh + los 2 K2A duplicados). 0 vars, 0 canales
+			// LocalIn/LocalOut y 0 paquetes OSC: se REUTILIZA sources_sig, que a
+			// partir de aqui ya no hace falta en su version cruda.
+			sources_sig = [out1.tanh, out2.tanh, out3.tanh, out4.tanh, out5.tanh, out6.tanh, K2A.ar(envL), K2A.ar(envR), fb_yellow[0], fb_yellow[1], feedback_in[8], feedback_in[9]];
+
 			
 			driftL = LFDNoise3.ar(0.08, driftAmt); driftR = LFDNoise3.ar(0.08, driftAmt);
 

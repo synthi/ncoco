@@ -1,4 +1,6 @@
--- lib/param_set.lua v3.05
+-- lib/param_set.lua v3.06
+-- v3.06: SOLO la etiqueta de version. El codigo NO se toco (el unico cambio de
+--   codigo de v3.06 esta en Engine_Ncoco.sc, y no toca el menu).
 -- CHANGELOG v3.05 (GLOBALS declaraba 7 y contiene 9):
 -- 1. FIX: los dos params estrenados en v3.04 ("Petal Polarity" y "Petal
 --    S&H/T&H") quedaban FUERA del grupo GLOBALS y aparecian sueltos al final

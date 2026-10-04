@@ -189,6 +189,36 @@ out1 = Select.ar(p1shape, [p1, c1]);
 - `p1shape = 0` → triángulo suave (la rampa `p1`)
 - `p1shape = 1` → escalones → "Castle" (la salida retentida `c1`)
 
+**Shape es un filtro de SALIDA, no parte del oscilador (v3.06).** El anillo de
+pétalos es el generador; `outN` decide **qué se manda hacia fuera**. Por eso hay
+**dos etapas** de `sources_sig`, y por eso el orden importa tanto como el
+contenido:
+
+```supercollider
+// etapa A: la rama CRUDA y retrasada (fb_petals) -> la frecuencia de los pétalos
+sources_sig = [fb_petals[0..5], …];
+mod_p1 = (sources_sig * mod_p1_Amts).sum * …;   // <- se resuelve AQUÍ
+…out1..out6 ya existen…
+// etapa B: la rama CON SHAPE, del bloque actual -> los destinos de audio
+sources_sig = [out1.tanh, …, out6.tanh, …];
+mod_val_speedL = (sources_sig * mod_speedL_Amts).sum * …;
+```
+
+La etapa A **no puede** ser la B: `mod_pN` alimenta la fase del propio pétalo, así
+que si leyera `outN` (valor del bloque actual) habría un lazo algebraico
+`pétal → sources_sig → mod_pN → pétal` sin retardo, y SuperCollider no puede
+construir eso. El retardo de un bloque de `fb_petals` es lo que rompe el lazo.
+Por el mismo motivo el acoplamiento del anillo sigue con la rama cruda: el anillo
+es el generador, y `Shape` solo actúa a la salida.
+
+> **Historia: esto estuvo roto desde v2.52.** Entre el commit `7737aaa` y `v3.05`
+> las dos etapas se colapsaron en una sola, la cruda. `Shape` solo afectaba al OSC
+> `/update`: con Castle el display dibujaba escalones y el sonido seguía siendo el
+> triángulo. No se notaba porque con **Tri (el default) `outN == pN`**, y las dos
+> ramas coinciden exactamente. El invariante que faltaba —*lo que se dibuja y lo
+> que se modula tienen que ser la misma variable*— está ahora en
+> `tools/verify_p29_petals.lua`.
+
 ### 4.2 Los dos modos globales de los pétalos (v3.04)
 
 Dos opciones globales en el menú, en el grupo **GLOBALS**, que afectan a los 6
@@ -201,12 +231,20 @@ Después de la rampa rectificada se re-centra reutilizando la misma variable:
 
 ```supercollider
 p1 = ((b_ph1 + (fb_petals[5] * p1c.pow(3) * 4.0)).wrap(0,1) * 2 - 1).abs;
-p1 = Select.ar(pBipolar, [p1, p1 - 0.5]);
+p1 = Select.ar(pBipolar, [p1, p1 * 2 - 1]);
 ```
+
+> **v3.05 corrigió el centrado.** Hasta v3.04 era `p1 - 0.5`, o sea un rango de
+> −0.5..+0.5 mientras que Abs llega a 1.0. Como la matriz aplica `.tanh`, el pico
+> bipolar era `tanh(0.5)=0.46`, el **61%** del pico de Abs (`tanh(1)=0.76`): el
+> bipolar se oía más flojo en vez de recorrer lo mismo en las dos direcciones.
+> `2*pN-1` pone el cero en el centro exacto de la rampa (`p=0.5 → 0`) y devuelve
+> el pico a 0.76, **idéntico al de Abs**.
 
 | | Abs | Bipolar |
 |---|---|---|
-| Rango | 0..1 | −0.5..+0.5 |
+| Rango | 0..1 | −1..+1 |
+| Pico tras el `.tanh` de la matriz | 0.76 | 0.76 |
 | Acoplamiento del anillo |unidireccional | **con signo, bidireccional** |
 | El "cero" | un pulso | una envolvente 50/50 |
 
@@ -247,6 +285,12 @@ que no hay desincronización entre las dos salidas.
 Los +24 son 6 `Select` (polaridad) + 6 `Select` + 6 `Gate` + 6 `Lag`. **Select no
 cortocircuita**: las dos ramas se evalúan siempre, así que en S&H el T&H también se
 calcula. Todos son ugens de una sola muestra.
+
+**Lo que costó v3.06** (la etapa B de `sources_sig`, ver §4.1): **+8 ugens**
+(6 `tanh` + 2 `K2A` duplicados), **+0 vars**, **+0 canales `LocalIn`/`LocalOut`**,
+**+0 paquetes OSC**. Se reutiliza `sources_sig` en vez de crear una variable
+nueva, porque a partir de la etapa B su versión cruda ya no hace falta: se resuelve
+antes en las seis `mod_pN`. Total acumulado en v3.06: **242 ugens**.
 
 **Fallo hacia atrás.** Solo el `1` exacto de la opción activa el modo nuevo; cualquier
 otro valor (un PSET corrupto, un parámetro eliminado, un `nil`) elige la rama 0, que
@@ -589,11 +633,16 @@ G.sources_val[12]    = args[24]      -- coco 2
 > No es un bug, pero es una tentación de bug futuro si alguien cambia el orden.
 
 > ⚠️ **`out1..out6` (args 9–14) pueden llegar NEGATIVOS desde v3.04.** En modo
-> Petal Polarity = Bipolar el pétalo es una señal con signo (−0.5..+0.5). Los tres
+> Petal Polarity = Bipolar el pétalo es una señal con signo (−1..+1). Los tres
 > consumidores de `sources_val[1..6]` están protegidos:
 > - `grid_nav.lua` — usa `math.abs()` en sus dos usos
-> - `ui.lua` — `draw_scope` pasa el valor por `util.clamp(…, 0, 1)`
-> - `quantussy.lua` — normaliza con `math.abs()` en su única lectura
+> - `ui.lua` — `draw_scope` recorta a −1..+1 en bipolar y dibuja la línea de cero
+>   en el centro de la caja (v3.05). **Hasta v3.05 recortaba a 0..1, y eso no
+>   era estar protegido**: era justo el bug de que el pétalo bipolar se dibujara
+>   siempre pegado a su mínimo, con media onda invisible y −0.4 dando la misma
+>   pantalla que 0.
+> - `quantussy.lua` — normaliza con `math.abs()` en su única lectura (los
+>   hexágonos se dimensionan por magnitud; un tamaño negativo no existe)
 >
 > `sources_val[7]` y `[8]` (envolventes, args 15–16) **no** son pétalos: no les
 > afecta el modo bipolar. Por eso el aviso de nivel de `ui.lua` sigue usando 0.95.

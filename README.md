@@ -1,7 +1,7 @@
 # ncoco
 A cocoquantus inspired instrument for Norns + grid
 
-**Versión: 3.05** — desde v3.01 todos los archivos comparten el mismo número de
+**Versión: 3.06** — desde v3.01 todos los archivos comparten el mismo número de
 versión. `NCOCO_VERSION` en `ncoco.lua` es la fuente autoritativa.
 
 ## Documentación

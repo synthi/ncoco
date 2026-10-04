@@ -1,4 +1,7 @@
--- lib/ui.lua v3.05
+-- lib/ui.lua v3.06
+-- v3.06: SOLO la etiqueta de version. El codigo NO se toco. El scope bipolar de
+--   v3.05 ya recibia outN por el OSC /update, asi que no se veia nada distinto:
+--   lo que se ve y lo que suena ya coinciden.
 -- CHANGELOG v3.05 (EL SCOPE DE LOS PETALOS SE CENTRA EN BIPOLAR):
 -- 1. draw_scope acepta un 8o argumento OPCIONAL (bipolar). Si no se le pasa,
 --    lo deduce solo: fuentes 1..6 (los petalos) con el param global

@@ -1,7 +1,8 @@
--- lib/grid_nav.lua v3.05
--- v3.05: SOLO la etiqueta de version. El codigo de este archivo NO se toco.
---   Ya se protegia solo con math.abs en sus dos lecturas de sources_val, de
---   modo que el bipolar de los petalos no le afecta (v3.04).
+-- lib/grid_nav.lua v3.06
+-- v3.06: SOLO la etiqueta de version. El codigo de este archivo NO se toco
+--   (el unico cambio de codigo de v3.06 esta en Engine_Ncoco.sc). El bipolar
+--   no le afecta: ya se protege con math.abs en sus dos lecturas de
+--   sources_val desde v3.04.
 -- v3.03 (LATIDO deja de dar falsas alarmas):
 -- 0. NEW: GridNav.heartbeat_step() — la decision del latido, sacada a una
 --    funcion PURA para poder testearla sin simular clock ni metro.
